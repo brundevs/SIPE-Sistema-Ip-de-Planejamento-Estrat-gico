@@ -15,7 +15,8 @@ import openpyxl
 from app.database.models import Colaborador, Vinculo, ProcessamentoRDO, LogAtividade
 from app.database.session import SessionLocal
 from app.core.pdf_extractor import (
-    extrair_texto_pdf, extrair_nomes_do_rdo, extrair_cpfs, limpar_nome
+    extrair_texto_pdf, extrair_nomes_do_rdo, extrair_cpfs, limpar_nome,
+    extrair_colaboradores_pte, extrair_data_documento
 )
 from app.core.fuzzy_engine import processar_lista_nomes, buscar_melhor_match
 from app.services.clima_service import obter_clima
@@ -35,6 +36,26 @@ api = Blueprint("api", __name__, url_prefix="/api")
 # EFETIVO (Gestão de Colaboradores)
 # ─────────────────────────────────────────────
 
+import re as _re
+
+def _limpar_cpf(valor: str) -> str:
+    """Remove tudo que não for dígito do CPF. Retorna string com 11 dígitos ou menos."""
+    return _re.sub(r'\D', '', str(valor or ''))
+
+def _normalizar_nome(valor: str) -> str:
+    """Aplica Title Case e remove espaços extras."""
+    if not valor:
+        return ''
+    return _re.sub(r'\s+', ' ', str(valor).strip()).title()
+
+def _normalizar_categoria(valor: str):
+    """Aceita MOD, MOI (case insensitive); retorna em maiúsculas ou None."""
+    if not valor:
+        return None
+    v = _re.sub(r'\s+', '', str(valor)).upper()
+    return v if v in ('MOD', 'MOI') else None
+
+
 @api.route("/efetivo/upload-excel", methods=["POST"])
 def upload_excel():
     """Upload e importação de planilha Excel com dados de colaboradores."""
@@ -51,77 +72,112 @@ def upload_excel():
 
     db = SessionLocal()
     try:
-        # Salvar arquivo
         filename = secure_filename(file.filename)
         filepath = UPLOADS_DIR / filename
         file.save(str(filepath))
 
-        # Processar Excel
         wb = openpyxl.load_workbook(str(filepath), data_only=True)
         ws = wb.active
 
-        # Detectar colunas (busca flexível nos cabeçalhos)
+        # ── Detectar colunas (cabeçalhos flexíveis) ────────────
         headers = {}
         for col_idx, cell in enumerate(ws[1], 1):
             if cell.value:
-                header = str(cell.value).strip().upper()
-                if "NOME" in header or "FUNCIONÁRIO" in header or "COLABORADOR" in header:
+                h = str(cell.value).strip().upper()
+                if "NOME" in h or "FUNCIONÁRIO" in h or "COLABORADOR" in h:
                     headers["nome"] = col_idx
-                elif "CPF" in header:
+                elif "CPF" in h:
                     headers["cpf"] = col_idx
-                elif "MATRÍCULA" in header or "MATRICULA" in header or "MAT" == header:
+                elif "MATRÍCULA" in h or "MATRICULA" in h or h == "MAT":
                     headers["matricula"] = col_idx
-                elif "CARGO" in header or "FUNÇÃO" in header or "FUNCAO" in header:
+                elif "CARGO" in h or "FUNÇÃO" in h or "FUNCAO" in h:
                     headers["cargo"] = col_idx
-                elif "SETOR" in header or "DEPARTAMENTO" in header or "DEPTO" in header:
+                elif "SETOR" in h or "DEPARTAMENTO" in h or "DEPTO" in h:
                     headers["setor"] = col_idx
+                elif "CATEGORIA" in h or h in ("MOD", "MOI", "TIPO"):
+                    headers["categoria"] = col_idx
 
         if "nome" not in headers:
-            return jsonify({"error": "Coluna de NOME não encontrada na planilha. Verifique os cabeçalhos."}), 400
+            return jsonify({"error": "Coluna de NOME não encontrada. Verifique os cabeçalhos."}), 400
 
         importados = 0
         atualizados = 0
         erros = 0
+        avisos = []
 
-        for row in ws.iter_rows(min_row=2, values_only=False):
+        for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=False), start=2):
             try:
                 nome_cell = row[headers["nome"] - 1].value
                 if not nome_cell or not str(nome_cell).strip():
                     continue
 
-                nome = limpar_nome(str(nome_cell))
-                cpf = str(row[headers["cpf"] - 1].value).strip() if "cpf" in headers and row[headers["cpf"] - 1].value else None
-                matricula = str(row[headers["matricula"] - 1].value).strip() if "matricula" in headers and row[headers["matricula"] - 1].value else None
-                cargo = str(row[headers["cargo"] - 1].value).strip() if "cargo" in headers and row[headers["cargo"] - 1].value else None
-                setor = str(row[headers["setor"] - 1].value).strip() if "setor" in headers and row[headers["setor"] - 1].value else None
+                # ── Padronização ───────────────────────────────
+                nome = _normalizar_nome(str(nome_cell))
 
-                # Verificar se já existe (por CPF ou matrícula ou nome)
+                # CPF: apenas dígitos, validar 11 chars
+                cpf = None
+                if "cpf" in headers and row[headers["cpf"] - 1].value:
+                    cpf_raw = str(row[headers["cpf"] - 1].value).strip()
+                    cpf_limpo = _limpar_cpf(cpf_raw)
+                    if len(cpf_limpo) == 11:
+                        cpf = cpf_limpo
+                    else:
+                        avisos.append(
+                            f"Linha {row_idx}: CPF '{cpf_raw}' ignorado — deve ter 11 dígitos."
+                        )
+
+                matricula = None
+                if "matricula" in headers and row[headers["matricula"] - 1].value:
+                    matricula = str(row[headers["matricula"] - 1].value).strip()
+
+                # Cargo: Title Case
+                cargo = None
+                if "cargo" in headers and row[headers["cargo"] - 1].value:
+                    cargo = str(row[headers["cargo"] - 1].value).strip().title()
+
+                setor = None
+                if "setor" in headers and row[headers["setor"] - 1].value:
+                    setor = str(row[headers["setor"] - 1].value).strip()
+
+                # Categoria: MOD ou MOI
+                categoria = None
+                if "categoria" in headers and row[headers["categoria"] - 1].value:
+                    cat_raw = str(row[headers["categoria"] - 1].value).strip()
+                    categoria = _normalizar_categoria(cat_raw)
+                    if not categoria:
+                        avisos.append(
+                            f"Linha {row_idx}: Categoria '{cat_raw}' ignorada — use MOD ou MOI."
+                        )
+
+                # ── Persistência ───────────────────────────────
                 existente = None
                 if cpf:
                     existente = db.query(Colaborador).filter(Colaborador.cpf == cpf).first()
                 if not existente and matricula:
                     existente = db.query(Colaborador).filter(Colaborador.matricula == matricula).first()
                 if not existente:
-                    existente = db.query(Colaborador).filter(func.lower(Colaborador.nome) == nome.lower()).first()
+                    existente = db.query(Colaborador).filter(
+                        func.lower(Colaborador.nome) == nome.lower()
+                    ).first()
 
                 if existente:
-                    # Atualizar dados existentes
                     existente.nome = nome
-                    if cpf: existente.cpf = cpf
+                    if cpf:       existente.cpf = cpf
                     if matricula: existente.matricula = matricula
-                    if cargo: existente.cargo = cargo
-                    if setor: existente.setor = setor
+                    if cargo:     existente.cargo = cargo
+                    if setor:     existente.setor = setor
+                    if categoria: existente.categoria = categoria
                     existente.data_atualizacao = datetime.now(timezone.utc)
                     atualizados += 1
                 else:
                     novo = Colaborador(
                         nome=nome, cpf=cpf, matricula=matricula,
-                        cargo=cargo, setor=setor
+                        cargo=cargo, setor=setor, categoria=categoria
                     )
                     db.add(novo)
                     importados += 1
 
-            except Exception as e:
+            except Exception:
                 erros += 1
                 continue
 
@@ -131,7 +187,6 @@ def upload_excel():
                       f"Excel importado: {importados} novos, {atualizados} atualizados, {erros} erros",
                       f"Arquivo: {filename}")
 
-        # Limpar arquivo temporário
         os.remove(str(filepath))
 
         return jsonify({
@@ -139,6 +194,7 @@ def upload_excel():
             "importados": importados,
             "atualizados": atualizados,
             "erros": erros,
+            "avisos": avisos,
             "total_base": db.query(Colaborador).count()
         })
 
@@ -147,6 +203,120 @@ def upload_excel():
         return jsonify({"error": f"Erro ao processar Excel: {str(e)}"}), 500
     finally:
         db.close()
+
+
+
+@api.route("/efetivo/modelo-padrao", methods=["GET"])
+def baixar_modelo_padrao():
+    """
+    Gera e devolve um arquivo .xlsx de template para importação de
+    colaboradores, com formatação, exemplos e validação de Categoria.
+    """
+    from io import BytesIO
+    from flask import send_file
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    wb = openpyxl.Workbook()
+
+    # ── Aba Colaboradores ──────────────────────────────────────
+    ws = wb.active
+    ws.title = "Colaboradores"
+
+    verde   = "1A6B3C"   # verde Ipê
+    verde_l = "EAF4EE"   # verde claro
+    branco  = "FFFFFF"
+
+    thin   = Side(style="thin", color="CCCCCC")
+    borda  = Border(left=thin, right=thin, top=thin, bottom=thin)
+    centro = Alignment(horizontal="center", vertical="center")
+    topo   = Alignment(wrap_text=True, vertical="top")
+
+    cabecalhos = [
+        ("Nome Completo", 42),
+        ("CPF",           22),
+        ("Cargo",         30),
+        ("Categoria",     16),
+    ]
+
+    for col, (titulo, larg) in enumerate(cabecalhos, 1):
+        c = ws.cell(row=1, column=col, value=titulo)
+        c.font      = Font(bold=True, color=branco, size=11)
+        c.fill      = PatternFill("solid", fgColor=verde)
+        c.alignment = centro
+        c.border    = borda
+        ws.column_dimensions[get_column_letter(col)].width = larg
+    ws.row_dimensions[1].height = 24
+
+    exemplos = [
+        ("Ana Paula Bastos",  "000.000.000-00",  "Auxiliar Administrativo", "MOI"),
+        ("Bruno Silva Lima",  "11122233344",     "Técnico Mecânico",        "MOD"),
+        ("Carla Souza Costa", "55566677788",     "Encarregado",             "MOD"),
+    ]
+    fill_ex = PatternFill("solid", fgColor=verde_l)
+    for r, linha in enumerate(exemplos, 2):
+        for c, val in enumerate(linha, 1):
+            cell = ws.cell(row=r, column=c, value=val)
+            cell.fill      = fill_ex
+            cell.alignment = topo
+            cell.border    = borda
+        ws.row_dimensions[r].height = 18
+
+    ws.freeze_panes = "A2"
+
+    # Validação de lista para Categoria (coluna D)
+    dv = DataValidation(type="list", formula1='"MOD,MOI"', allow_blank=True)
+    dv.sqref = "D2:D10000"
+    ws.add_data_validation(dv)
+
+    # ── Aba Instruções ─────────────────────────────────────────
+    wi = wb.create_sheet("Instruções")
+    wi.column_dimensions["A"].width = 22
+    wi.column_dimensions["B"].width = 65
+
+    cabec_f = Font(bold=True, color=branco, size=11)
+    cabec_p = PatternFill("solid", fgColor=verde)
+    titulo_f = Font(bold=True, size=13, color=verde)
+    normal_f = Font(size=11)
+    wrap_a   = Alignment(wrap_text=True, vertical="top")
+
+    wi["A1"] = "MODELO PADRÃO DE IMPORTAÇÃO — SIPE"
+    wi["A1"].font = titulo_f
+    wi.merge_cells("A1:B1")
+    wi["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    wi.row_dimensions[1].height = 28
+
+    instrucoes = [
+        ("Campo",          "Descrição / Regras"),
+        ("Nome Completo",  "Nome sem abreviações. O sistema normaliza para Title Case: 'BRUNO BASTOS' vira 'Bruno Bastos'."),
+        ("CPF",            "Aceita com ou sem máscara. O sistema remove pontos/traços e valida 11 dígitos."),
+        ("Cargo",          "Nomenclatura oficial. O sistema normalizará as maiúsculas automaticamente."),
+        ("Categoria",      "\"MOD\" (Mão de Obra Direta) ou \"MOI\" (Mão de Obra Indireta). Outros valores são descartados com aviso."),
+    ]
+    for r, (campo, desc) in enumerate(instrucoes, 3):
+        ca = wi.cell(row=r, column=1, value=campo)
+        cb = wi.cell(row=r, column=2, value=desc)
+        if r == 3:
+            ca.font = cabec_f; ca.fill = cabec_p
+            cb.font = cabec_f; cb.fill = cabec_p
+        else:
+            ca.font = Font(bold=True, size=11)
+            cb.font = normal_f
+        ca.alignment = wrap_a
+        cb.alignment = wrap_a
+        wi.row_dimensions[r].height = 42
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name="modelo_importacao_colaboradores.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
 
 @api.route("/efetivo/colaboradores", methods=["GET"])
@@ -357,10 +527,113 @@ def historico_processamentos():
     """Lista histórico de processamentos."""
     db = SessionLocal()
     try:
-        procs = db.query(ProcessamentoRDO).order_by(ProcessamentoRDO.data_processamento.desc()).limit(20).all()
+        procs = db.query(ProcessamentoRDO).order_by(ProcessamentoRDO.data_processamento.desc()).limit(50).all()
         return jsonify({"processamentos": [p.to_dict() for p in procs]})
     finally:
         db.close()
+
+
+@api.route("/rdo/historico/<int:proc_id>", methods=["DELETE"])
+def deletar_processamento(proc_id):
+    """Remove um registro do histórico de processamentos."""
+    db = SessionLocal()
+    try:
+        proc = db.query(ProcessamentoRDO).filter(ProcessamentoRDO.id == proc_id).first()
+        if not proc:
+            return jsonify({"error": "Processamento não encontrado"}), 404
+        nome = proc.nome_arquivo
+        db.delete(proc)
+        db.commit()
+        registrar_log(db, "info", "rdo", f"Histórico removido: {nome}")
+        return jsonify({"success": True, "mensagem": f"Registro '{nome}' removido."})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+# ─────────────────────────────────────────────
+# PTE / CESLA (Leitura de Presença MOD)
+# ─────────────────────────────────────────────
+
+@api.route("/pte/processar", methods=["POST"])
+def processar_pte():
+    """
+    Recebe um ou mais PDFs (campo 'files[]') do PTE/Cesla,
+    extrai colaboradores MOD e retorna lista agrupada por data do documento.
+    """
+    arquivos = request.files.getlist("files[]")
+    if not arquivos:
+        # suporte alternativo: campo 'file' singular
+        arquivo_single = request.files.get("file")
+        if arquivo_single:
+            arquivos = [arquivo_single]
+        else:
+            return jsonify({"error": "Nenhum arquivo PDF enviado"}), 400
+
+    resultados = []  # lista de {arquivo, data, colaboradores}
+    erros = []
+
+    for file in arquivos:
+        if not file or not file.filename:
+            continue
+
+        ext = Path(file.filename).suffix.lower()
+        if ext not in ALLOWED_EXTENSIONS_PDF:
+            erros.append({"arquivo": file.filename, "erro": "Extensão inválida (apenas .pdf)"})
+            continue
+
+        try:
+            filename = secure_filename(file.filename)
+            filepath = UPLOADS_DIR / filename
+            file.save(str(filepath))
+
+            texto = extrair_texto_pdf(str(filepath))
+            data_doc = extrair_data_documento(texto)
+            colaboradores = extrair_colaboradores_pte(texto)
+
+            # Limpar arquivo temporário
+            try:
+                os.remove(str(filepath))
+            except Exception:
+                pass
+
+            resultados.append({
+                "arquivo": file.filename,
+                "data": data_doc,
+                "total": len(colaboradores),
+                "colaboradores": colaboradores,
+            })
+
+        except Exception as e:
+            erros.append({"arquivo": file.filename, "erro": str(e)})
+            try:
+                os.remove(str(filepath))
+            except Exception:
+                pass
+
+    if not resultados and erros:
+        return jsonify({"error": "Todos os arquivos falharam", "detalhes": erros}), 400
+
+    # Log
+    db = SessionLocal()
+    try:
+        total_colabs = sum(r["total"] for r in resultados)
+        registrar_log(
+            db, "success", "pte",
+            f"PTE processado: {len(resultados)} arquivo(s), {total_colabs} colaborador(es) MOD",
+            f"Arquivos: {[r['arquivo'] for r in resultados]}"
+        )
+    finally:
+        db.close()
+
+    return jsonify({
+        "success": True,
+        "processados": len(resultados),
+        "resultados": resultados,
+        "erros": erros,
+    })
 
 
 # ─────────────────────────────────────────────

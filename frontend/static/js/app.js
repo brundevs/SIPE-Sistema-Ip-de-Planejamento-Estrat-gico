@@ -27,7 +27,8 @@ function navigateTo(page) {
   const titles = {
     dashboard: ['Dashboard', 'Visão geral do sistema'],
     efetivo: ['Gestão de Efetivo', 'Importar planilhas e gerenciar colaboradores'],
-    rdo: ['Processar RDO', 'Extração e matching de nomes em PDFs'],
+    rdo: ['Leitura PTE / Cesla', 'Extração de colaboradores MOD em PDFs'],
+    moi: ['Gestão de MOI', 'Mão de obra indireta cadastrada manualmente'],
     clima: ['Clima', 'Condições meteorológicas em tempo real'],
     historico: ['Histórico', 'Processamentos anteriores e logs do sistema'],
   };
@@ -145,6 +146,18 @@ async function loadDashboard() {
 }
 
 // ── Efetivo (Colaboradores) ────────────────────
+
+/** Baixa a planilha-modelo de importação gerada pelo backend. */
+function baixarModeloEfetivo() {
+  const a = document.createElement('a');
+  a.href = '/api/efetivo/modelo-padrao';
+  a.download = 'modelo_importacao_colaboradores.xlsx';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  showToast('Modelo baixado — preencha e importe pelo botão de upload.', 'info', 5000);
+}
+
 async function handleExcelUpload(input) {
   const file = input.files[0];
   if (!file) return;
@@ -154,6 +167,12 @@ async function handleExcelUpload(input) {
   const formData = new FormData();
   formData.append('file', file);
 
+  // Ocultar avisos anteriores
+  const avisosEl   = document.getElementById('efetivoAvisos');
+  const avisosListEl = document.getElementById('efetivoAvisosList');
+  if (avisosEl) avisosEl.style.display = 'none';
+  if (avisosListEl) avisosListEl.innerHTML = '';
+
   try {
     const data = await apiCall('/api/efetivo/upload-excel', {
       method: 'POST',
@@ -161,12 +180,23 @@ async function handleExcelUpload(input) {
     });
 
     hideLoading();
+
+    const errosMsg = data.erros > 0 ? ` (${data.erros} linhas com erro)` : '';
     showToast(
-      `Importação concluída! ${data.importados} novos, ${data.atualizados} atualizados. Total: ${data.total_base}`,
+      `Importação concluída! ${data.importados} novos, ${data.atualizados} atualizados. Total: ${data.total_base}${errosMsg}`,
       'success',
       6000
     );
     document.getElementById('badgeEfetivo').textContent = data.total_base;
+
+    // Mostrar avisos de CPF inválido / categoria desconhecida
+    if (avisosEl && avisosListEl && Array.isArray(data.avisos) && data.avisos.length > 0) {
+      avisosListEl.innerHTML = data.avisos
+        .map(av => `<li>${escapeHtml(av)}</li>`)
+        .join('');
+      avisosEl.style.display = 'block';
+    }
+
     loadColaboradores();
   } catch (e) {
     hideLoading();
@@ -401,6 +431,310 @@ function rejectVinculo(idx) {
   }
   showToast('Vínculo rejeitado', 'info');
 }
+
+// ── PTE / Cesla ───────────────────────────────────────
+// Resultado acumulado de todos os PDFs desta sessão
+let pteAcumulado = {}; // { 'DD/MM/YYYY': [ {nome, cpf, matricula, cargo}, ... ] }
+
+async function handlePteUpload(input) {
+  const files = Array.from(input.files);
+  if (!files.length) return;
+
+  // Mostrar fila
+  const queueEl = document.getElementById('pteUploadQueue');
+  const listEl = document.getElementById('pteUploadList');
+  queueEl.style.display = 'block';
+
+  for (const file of files) {
+    const itemId = 'pte_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+    const itemEl = document.createElement('div');
+    itemEl.id = itemId;
+    itemEl.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg-primary);border-radius:8px;border:1px solid var(--border-subtle);font-size:13px;';
+    itemEl.innerHTML = `
+      <span style="flex:1;font-weight:600;">${escapeHtml(file.name)}</span>
+      <span class="badge badge-info" id="${itemId}_status">Aguardando...</span>
+    `;
+    listEl.appendChild(itemEl);
+
+    const statusEl = document.getElementById(itemId + '_status');
+    statusEl.textContent = 'Processando...';
+    statusEl.className = 'badge badge-warning';
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const data = await apiCall('/api/pte/processar', { method: 'POST', body: formData });
+
+      // data esperado: { data_documento: 'DD/MM/YYYY', colaboradores: [{nome,cpf,matricula,cargo}] }
+      const dataDoc = data.data_documento || 'Sem Data';
+      if (!pteAcumulado[dataDoc]) pteAcumulado[dataDoc] = [];
+
+      // Adicionar evitando duplicatas por nome+cpf
+      for (const colab of (data.colaboradores || [])) {
+        const exists = pteAcumulado[dataDoc].some(c => c.nome === colab.nome && c.cpf === colab.cpf);
+        if (!exists) pteAcumulado[dataDoc].push(colab);
+      }
+
+      statusEl.textContent = `✓ ${(data.colaboradores || []).length} MOD extraídos`;
+      statusEl.className = 'badge badge-success';
+
+      // Ordenar por nome dentro de cada data
+      Object.keys(pteAcumulado).forEach(dt => {
+        pteAcumulado[dt].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+      });
+
+      renderPteResults();
+
+    } catch (e) {
+      statusEl.textContent = `Erro: ${e.message}`;
+      statusEl.className = 'badge badge-error';
+    }
+  }
+
+  input.value = '';
+}
+
+function renderPteResults() {
+  const container = document.getElementById('pteGroupsContainer');
+  const resultsEl = document.getElementById('pteResults');
+  const emptyEl = document.getElementById('pteEmptyState');
+
+  const datas = Object.keys(pteAcumulado).sort();
+  if (datas.length === 0) {
+    resultsEl.style.display = 'none';
+    emptyEl.style.display = 'block';
+    return;
+  }
+
+  resultsEl.style.display = 'block';
+  emptyEl.style.display = 'none';
+
+  const totalColabs = datas.reduce((acc, dt) => acc + pteAcumulado[dt].length, 0);
+  document.getElementById('pteResultsSubtitle').textContent =
+    `${totalColabs} colaboradores MOD em ${datas.length} documento(s)`;
+
+  container.innerHTML = datas.map(dt => {
+    const colabs = pteAcumulado[dt];
+    return `
+      <div style="margin-bottom:20px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding:0 4px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:16px;">📅</span>
+            <span style="font-weight:700;font-size:14px;">${escapeHtml(dt)}</span>
+            <span class="badge badge-info">${colabs.length} MOD</span>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="copiarCpfsPorData('${escapeHtml(dt)}')" title="Copiar CPFs desta data">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Copiar CPFs
+          </button>
+        </div>
+        <div class="table-wrapper">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Nome</th>
+                <th>CPF</th>
+                <th>Matrícula</th>
+                <th>Cargo</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${colabs.map((c, i) => `
+                <tr>
+                  <td style="color:var(--text-muted);font-size:12px;">${i + 1}</td>
+                  <td style="font-weight:600;">${escapeHtml(c.nome)}</td>
+                  <td><span style="font-family:'JetBrains Mono',monospace;font-size:12px;">${escapeHtml(c.cpf || '—')}</span></td>
+                  <td><span style="font-family:'JetBrains Mono',monospace;font-size:12px;">${escapeHtml(c.matricula || '—')}</span></td>
+                  <td style="font-size:13px;">${escapeHtml(c.cargo || '—')}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function copiarCpfsPorData(dt) {
+  const colabs = pteAcumulado[dt] || [];
+  const cpfs = colabs.map(c => c.cpf).filter(Boolean);
+  if (!cpfs.length) { showToast('Nenhum CPF disponível para esta data.', 'warning'); return; }
+  navigator.clipboard.writeText(cpfs.join('\n'))
+    .then(() => showToast(`${cpfs.length} CPFs copiados (${dt})!`, 'success'))
+    .catch(() => showToast('Erro ao copiar', 'error'));
+}
+
+function copiarTodosCpfs() {
+  const datas = Object.keys(pteAcumulado).sort();
+  const todosColabs = datas.flatMap(dt => pteAcumulado[dt]);
+  const cpfs = todosColabs.map(c => c.cpf).filter(Boolean);
+  if (!cpfs.length) { showToast('Nenhum CPF disponível.', 'warning'); return; }
+  navigator.clipboard.writeText(cpfs.join('\n'))
+    .then(() => showToast(`${cpfs.length} CPFs copiados!`, 'success'))
+    .catch(() => showToast('Erro ao copiar', 'error'));
+}
+
+function limparResultadosPTE() {
+  pteAcumulado = {};
+  document.getElementById('pteGroupsContainer').innerHTML = '';
+  document.getElementById('pteResults').style.display = 'none';
+  document.getElementById('pteEmptyState').style.display = 'block';
+  document.getElementById('pteUploadQueue').style.display = 'none';
+  document.getElementById('pteUploadList').innerHTML = '';
+  showToast('Resultados limpos.', 'info');
+}
+
+// ── Gestão de MOI ─────────────────────────────────────────
+let moiLista = []; // [{nome, cpf, matricula, cargo, origem}]
+let moiSugestoesCache = [];
+let moiSearchTimer = null;
+
+function adicionarMoiManual() {
+  const input = document.getElementById('moiNomeManual');
+  const nome = input.value.trim();
+  if (!nome) { input.focus(); return; }
+
+  const jaExiste = moiLista.some(m => m.nome.toLowerCase() === nome.toLowerCase());
+  if (jaExiste) { showToast('Colaborador já adicionado na lista MOI.', 'warning'); return; }
+
+  moiLista.push({ nome, cpf: '', matricula: '', cargo: '', origem: 'Manual' });
+  input.value = '';
+  renderMoiTable();
+  showToast(`"${nome}" adicionado como MOI.`, 'success');
+}
+
+async function buscarParaMoi(query) {
+  const sugsEl = document.getElementById('moiSugestoes');
+  clearTimeout(moiSearchTimer);
+
+  if (!query || query.length < 2) {
+    sugsEl.style.display = 'none';
+    return;
+  }
+
+  moiSearchTimer = setTimeout(async () => {
+    try {
+      const data = await apiCall(`/api/efetivo/colaboradores?busca=${encodeURIComponent(query)}&per_page=8`);
+      moiSugestoesCache = data.colaboradores || [];
+
+      if (!moiSugestoesCache.length) {
+        sugsEl.innerHTML = '<div style="padding:10px 14px;color:var(--text-muted);font-size:13px;">Nenhum resultado encontrado.</div>';
+      } else {
+        sugsEl.innerHTML = moiSugestoesCache.map((c, i) => `
+          <div
+            style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border-subtle);display:flex;gap:10px;align-items:center;"
+            onmouseover="this.style.background='var(--bg-hover)'"
+            onmouseout="this.style.background='transparent'"
+            onclick="selecionarMoiDaBase(${i})"
+          >
+            <div style="flex:1;">
+              <div style="font-weight:600;font-size:13px;">${escapeHtml(c.nome)}</div>
+              <div style="font-size:11px;color:var(--text-muted);">${escapeHtml(c.cpf || '')} ${c.cargo ? '· ' + escapeHtml(c.cargo) : ''}</div>
+            </div>
+          </div>
+        `).join('');
+      }
+      sugsEl.style.display = 'block';
+    } catch (e) {
+      console.error(e);
+    }
+  }, 280);
+}
+
+function selecionarMoiDaBase(idx) {
+  const colab = moiSugestoesCache[idx];
+  if (!colab) return;
+
+  const jaExiste = moiLista.some(m => m.nome === colab.nome);
+  if (jaExiste) { showToast('Colaborador já adicionado na lista MOI.', 'warning'); return; }
+
+  moiLista.push({
+    nome: colab.nome,
+    cpf: colab.cpf || '',
+    matricula: colab.matricula || '',
+    cargo: colab.cargo || '',
+    origem: 'Base'
+  });
+
+  document.getElementById('moiBuscaBase').value = '';
+  document.getElementById('moiSugestoes').style.display = 'none';
+  moiSugestoesCache = [];
+  renderMoiTable();
+  showToast(`"${colab.nome}" adicionado como MOI.`, 'success');
+}
+
+function selecionarPrimeiroMoi() {
+  if (moiSugestoesCache.length > 0) {
+    selecionarMoiDaBase(0);
+  } else {
+    adicionarMoiManual();
+  }
+}
+
+function removerMoi(idx) {
+  const nome = moiLista[idx] ? moiLista[idx].nome : '';
+  moiLista.splice(idx, 1);
+  renderMoiTable();
+  showToast(`"${nome}" removido da lista MOI.`, 'info');
+}
+
+function renderMoiTable() {
+  const tbody = document.getElementById('moiTbody');
+  const wrapperEl = document.getElementById('moiTableWrapper');
+  const emptyEl = document.getElementById('moiEmptyState');
+
+  if (!moiLista.length) {
+    wrapperEl.style.display = 'none';
+    emptyEl.style.display = 'block';
+    return;
+  }
+
+  wrapperEl.style.display = 'block';
+  emptyEl.style.display = 'none';
+
+  tbody.innerHTML = moiLista.map((m, i) => `
+    <tr>
+      <td style="color:var(--text-muted);font-size:12px;">${i + 1}</td>
+      <td style="font-weight:600;">${escapeHtml(m.nome)}</td>
+      <td><span style="font-family:'JetBrains Mono',monospace;font-size:12px;">${escapeHtml(m.cpf || '—')}</span></td>
+      <td><span style="font-family:'JetBrains Mono',monospace;font-size:12px;">${escapeHtml(m.matricula || '—')}</span></td>
+      <td style="font-size:13px;">${escapeHtml(m.cargo || '—')}</td>
+      <td><span class="badge badge-${m.origem === 'Base' ? 'success' : 'info'}">${escapeHtml(m.origem)}</span></td>
+      <td>
+        <button class="btn btn-ghost btn-sm" onclick="removerMoi(${i})" title="Remover">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
+        </button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function copiarCpfsMoi() {
+  const cpfs = moiLista.map(m => m.cpf).filter(Boolean);
+  if (!cpfs.length) { showToast('Nenhum CPF disponível na lista MOI.', 'warning'); return; }
+  navigator.clipboard.writeText(cpfs.join('\n'))
+    .then(() => showToast(`${cpfs.length} CPFs MOI copiados!`, 'success'))
+    .catch(() => showToast('Erro ao copiar', 'error'));
+}
+
+function limparMoi() {
+  if (moiLista.length && !confirm('Limpar toda a lista de MOI?')) return;
+  moiLista = [];
+  renderMoiTable();
+  showToast('Lista MOI limpa.', 'info');
+}
+
+// Fechar sugestões de MOI ao clicar fora
+document.addEventListener('click', (e) => {
+  const sugsEl = document.getElementById('moiSugestoes');
+  const inputEl = document.getElementById('moiBuscaBase');
+  if (sugsEl && inputEl && !sugsEl.contains(e.target) && e.target !== inputEl) {
+    sugsEl.style.display = 'none';
+  }
+});
 
 // ── Clima ──────────────────────────────────────
 let ultimaBuscaClima = null;
@@ -684,11 +1018,12 @@ async function loadHistorico() {
                 <th>Revisão</th>
                 <th>Sem Match</th>
                 <th>Status</th>
+                <th style="width:60px;text-align:center;">Ação</th>
               </tr>
             </thead>
             <tbody>
               ${data.processamentos.map(p => `
-                <tr>
+                <tr id="hist-row-${p.id}">
                   <td style="font-weight: 600;">${escapeHtml(p.nome_arquivo)}</td>
                   <td style="font-size: 12px;">${formatDate(p.data_processamento)}</td>
                   <td style="font-family: 'JetBrains Mono'; font-size: 13px;">${p.total_nomes_extraidos}</td>
@@ -696,17 +1031,54 @@ async function loadHistorico() {
                   <td><span class="badge badge-warning">${p.total_matches_revisao}</span></td>
                   <td><span class="badge badge-error">${p.total_sem_match}</span></td>
                   <td><span class="badge badge-${p.status === 'concluido' ? 'success' : p.status === 'erro' ? 'error' : 'info'}">${p.status}</span></td>
+                  <td style="text-align:center;">
+                    <button
+                      class="btn-delete-hist"
+                      title="Remover este registro"
+                      onclick="deletarProcessamento(${p.id}, '${escapeHtml(p.nome_arquivo).replace(/'/g, "\\'")}')"
+                      style="background:none;border:none;cursor:pointer;color:#ef4444;padding:4px 8px;border-radius:6px;transition:background .2s;"
+                      onmouseover="this.style.background='#fee2e2'"
+                      onmouseout="this.style.background='none'"
+                    >🗑️</button>
+                  </td>
                 </tr>
               `).join('')}
             </tbody>
           </table>
         </div>
       `;
+    } else {
+      container.innerHTML = `<div class="empty-state"><p>Nenhum processamento registrado.</p></div>`;
     }
   } catch (e) {
     console.error('Historico error:', e);
   }
 }
+
+async function deletarProcessamento(id, nome) {
+  if (!confirm(`Remover o registro "${nome}" do histórico?\n\nEsta ação não pode ser desfeita.`)) return;
+  try {
+    const resp = await fetch(`/api/rdo/historico/${id}`, { method: 'DELETE' });
+    const data = await resp.json();
+    if (resp.ok && data.success) {
+      // Remover a linha da tabela sem recarregar tudo
+      const row = document.getElementById(`hist-row-${id}`);
+      if (row) {
+        row.style.transition = 'opacity .3s';
+        row.style.opacity = '0';
+        setTimeout(() => row.remove(), 310);
+      }
+      showToast('Registro removido com sucesso.', 'success');
+    } else {
+      showToast(data.error || 'Erro ao remover registro.', 'error');
+    }
+  } catch (e) {
+    showToast('Erro de comunicação com o servidor.', 'error');
+    console.error('Delete hist error:', e);
+  }
+}
+
+
 
 async function loadLogs() {
   try {
@@ -730,6 +1102,365 @@ async function loadLogs() {
   } catch (e) {
     console.error('Logs error:', e);
   }
+}
+
+// ══════════════════════════════════════════════════════════════
+// PTE / CESLA — Leitura de Presença MOD
+// ══════════════════════════════════════════════════════════════
+
+/** Estado global do módulo PTE */
+const pteState = {
+  resultados: [],   // [{arquivo, data, total, colaboradores}]
+};
+
+/**
+ * Chamado pelo input[type=file] ao selecionar arquivos.
+ * Mostra a fila de arquivos e dispara o processamento.
+ */
+async function handlePteUpload(input) {
+  const files = Array.from(input.files);
+  if (!files.length) return;
+
+  // Mostra a fila de arquivos
+  const queue = document.getElementById('pteUploadQueue');
+  const list  = document.getElementById('pteUploadList');
+  queue.style.display = 'block';
+  list.innerHTML = files.map(f => `
+    <div style="display:flex; align-items:center; gap:8px; padding:8px 12px;
+                background:var(--bg-hover); border-radius:var(--radius-sm);">
+      <svg viewBox="0 0 24 24" fill="none" stroke="var(--primary-500)" stroke-width="2" width="14" height="14">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+      </svg>
+      <span style="flex:1; font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+        ${escapeHtml(f.name)}
+      </span>
+      <span style="font-size:11px; color:var(--text-muted);">${(f.size / 1024).toFixed(1)} KB</span>
+    </div>
+  `).join('');
+
+  // Esconder estado vazio e resultados anteriores
+  document.getElementById('pteEmptyState').style.display = 'none';
+  document.getElementById('pteResults').style.display = 'none';
+
+  showLoading('Extraindo colaboradores MOD dos PDFs...');
+
+  try {
+    const formData = new FormData();
+    files.forEach(f => formData.append('files[]', f));
+
+    const resp = await fetch('/api/pte/processar', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+      throw new Error(err.error || `Erro ${resp.status}`);
+    }
+
+    const data = await resp.json();
+
+    // Acumula resultados
+    if (data.resultados && data.resultados.length > 0) {
+      pteState.resultados.push(...data.resultados);
+      renderPteGroups();
+      document.getElementById('pteResults').style.display = 'block';
+
+      const total = data.resultados.reduce((s, r) => s + r.total, 0);
+      showToast(`✅ ${data.processados} arquivo(s) — ${total} colaborador(es) MOD extraído(s)`, 'success');
+    } else {
+      showToast('Nenhum colaborador MOD encontrado nos PDFs.', 'warning');
+      if (!pteState.resultados.length) {
+        document.getElementById('pteEmptyState').style.display = 'block';
+      }
+    }
+
+    if (data.erros && data.erros.length > 0) {
+      data.erros.forEach(e => showToast(`⚠️ ${e.arquivo}: ${e.erro}`, 'error'));
+    }
+
+  } catch (err) {
+    showToast(err.message || 'Erro ao processar PDFs', 'error');
+    if (!pteState.resultados.length) {
+      document.getElementById('pteEmptyState').style.display = 'block';
+    }
+  } finally {
+    hideLoading();
+    // Reset o input para permitir re-selecionar os mesmos arquivos
+    input.value = '';
+  }
+}
+
+/**
+ * Renderiza os grupos de colaboradores MOD agrupados por data do documento.
+ */
+function renderPteGroups() {
+  const container = document.getElementById('pteGroupsContainer');
+  const subtitle  = document.getElementById('pteResultsSubtitle');
+
+  // Agrupar por data
+  const porData = {};
+  pteState.resultados.forEach(r => {
+    const key = r.data || 'Sem Data';
+    if (!porData[key]) porData[key] = { colaboradores: [], arquivos: [] };
+    porData[key].colaboradores.push(...r.colaboradores);
+    if (!porData[key].arquivos.includes(r.arquivo)) {
+      porData[key].arquivos.push(r.arquivo);
+    }
+  });
+
+  const totalGeral = Object.values(porData).reduce((s, g) => s + g.colaboradores.length, 0);
+  subtitle.textContent = `${totalGeral} colaborador(es) extraído(s) — agrupados por data, ordem alfabética`;
+
+  const datas = Object.keys(porData).sort((a, b) => {
+    // Ordenar datas DD/MM/YYYY descendente
+    if (a === 'Sem Data') return 1;
+    if (b === 'Sem Data') return -1;
+    const [da, ma, aa] = a.split('/');
+    const [db, mb, ab] = b.split('/');
+    return new Date(`${ab}-${mb}-${db}`) - new Date(`${aa}-${ma}-${da}`);
+  });
+
+  container.innerHTML = datas.map(data => {
+    const grupo = porData[data];
+    const colabs = [...grupo.colaboradores].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+
+    return `
+      <div style="margin-bottom: 24px;">
+        <!-- Cabeçalho do grupo -->
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px; padding:10px 14px;
+                    background:var(--primary-500)20; border-radius:var(--radius-md);
+                    border-left:4px solid var(--primary-500);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="var(--primary-500)" stroke-width="2" width="16" height="16">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+            <line x1="16" y1="2" x2="16" y2="6"/>
+            <line x1="8" y1="2" x2="8" y2="6"/>
+            <line x1="3" y1="10" x2="21" y2="10"/>
+          </svg>
+          <span style="font-weight:700; color:var(--primary-500);">📅 ${escapeHtml(data)}</span>
+          <span style="font-size:12px; color:var(--text-muted);">${colabs.length} colaborador(es)</span>
+          <span style="font-size:11px; color:var(--text-muted); margin-left:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+            ${grupo.arquivos.map(a => escapeHtml(a)).join(', ')}
+          </span>
+        </div>
+
+        <!-- Tabela -->
+        <div class="table-wrapper">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Nome</th>
+                <th>CPF</th>
+                <th>Matrícula</th>
+                <th>Cargo</th>
+                <th style="width:40px;"></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${colabs.map((c, i) => `
+                <tr>
+                  <td style="font-family:'JetBrains Mono'; font-size:12px; color:var(--text-muted);">${i + 1}</td>
+                  <td style="font-weight:600;">${escapeHtml(c.nome)}</td>
+                  <td style="font-family:'JetBrains Mono'; font-size:12px;">${escapeHtml(c.cpf) || '<span style="color:var(--text-muted);">—</span>'}</td>
+                  <td style="font-family:'JetBrains Mono'; font-size:12px;">${escapeHtml(c.matricula) || '<span style="color:var(--text-muted);">—</span>'}</td>
+                  <td style="font-size:12px; color:var(--text-secondary);">${escapeHtml(c.cargo) || '—'}</td>
+                  <td>
+                    ${c.cpf ? `
+                      <button class="btn btn-ghost btn-sm" style="padding:4px 8px;" title="Copiar CPF"
+                        onclick="navigator.clipboard.writeText('${c.cpf}').then(()=>showToast('CPF copiado!','success'))">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
+                          <rect x="9" y="9" width="13" height="13" rx="2"/>
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                        </svg>
+                      </button>
+                    ` : ''}
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+/** Copia todos os CPFs de todos os grupos para a área de transferência. */
+function copiarTodosCpfs() {
+  const cpfs = [];
+  pteState.resultados.forEach(r => {
+    r.colaboradores.forEach(c => {
+      if (c.cpf && !cpfs.includes(c.cpf)) cpfs.push(c.cpf);
+    });
+  });
+
+  if (!cpfs.length) {
+    showToast('Nenhum CPF disponível para copiar.', 'warning');
+    return;
+  }
+
+  navigator.clipboard.writeText(cpfs.join('\n')).then(() => {
+    showToast(`✅ ${cpfs.length} CPF(s) copiado(s)!`, 'success');
+  }).catch(() => showToast('Falha ao copiar CPFs.', 'error'));
+}
+
+/** Limpa todos os resultados do módulo PTE. */
+function limparResultadosPTE() {
+  pteState.resultados = [];
+  document.getElementById('pteResults').style.display = 'none';
+  document.getElementById('pteEmptyState').style.display = 'block';
+  document.getElementById('pteUploadQueue').style.display = 'none';
+  document.getElementById('pteGroupsContainer').innerHTML = '';
+  showToast('Resultados limpos.', 'info');
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// MOI — Gestão de Mão de Obra Indireta
+// ══════════════════════════════════════════════════════════════
+
+const moiState = {
+  lista: [],       // [{nome, cpf, matricula, cargo, origem}]
+  _baseCache: [],  // cache de colaboradores da base para autocomplete
+};
+
+/** Carrega o cache da base de colaboradores para autocomplete MOI. */
+async function _carregarBaseMoi() {
+  if (moiState._baseCache.length) return;
+  try {
+    const data = await apiCall('/api/efetivo/colaboradores?per_page=2000');
+    moiState._baseCache = data.colaboradores || [];
+  } catch (_) {}
+}
+
+/** Adiciona um colaborador MOI digitado manualmente. */
+function adicionarMoiManual() {
+  const input = document.getElementById('moiNomeManual');
+  const nome  = input.value.trim();
+  if (!nome) { showToast('Digite um nome válido.', 'warning'); return; }
+
+  const jaExiste = moiState.lista.some(m => m.nome.toLowerCase() === nome.toLowerCase());
+  if (jaExiste) { showToast('Colaborador já está na lista MOI.', 'warning'); return; }
+
+  moiState.lista.push({ nome, cpf: '', matricula: '', cargo: '', origem: 'Manual' });
+  input.value = '';
+  renderMoiTable();
+  showToast(`${nome} adicionado ao MOI.`, 'success');
+}
+
+/** Filtra colaboradores da base enquanto o usuário digita. */
+async function buscarParaMoi(valor) {
+  await _carregarBaseMoi();
+  const sugestoes = document.getElementById('moiSugestoes');
+  const q = valor.toLowerCase().trim();
+
+  if (!q) { sugestoes.style.display = 'none'; return; }
+
+  const filtrados = moiState._baseCache
+    .filter(c => c.nome.toLowerCase().includes(q))
+    .slice(0, 10);
+
+  if (!filtrados.length) { sugestoes.style.display = 'none'; return; }
+
+  sugestoes.style.display = 'block';
+  sugestoes.innerHTML = filtrados.map(c => `
+    <div style="padding:10px 14px; cursor:pointer; border-bottom:1px solid var(--border-subtle);
+                font-size:13px; transition:background 0.15s;"
+      onmouseover="this.style.background='var(--bg-hover)'"
+      onmouseout="this.style.background=''"
+      onclick="selecionarMoiDaBase(${JSON.stringify(JSON.stringify(c))})">
+      <div style="font-weight:600;">${escapeHtml(c.nome)}</div>
+      <div style="font-size:11px; color:var(--text-muted);">${c.cpf || ''} ${c.cargo ? '· ' + c.cargo : ''}</div>
+    </div>
+  `).join('');
+}
+
+/** Seleciona um colaborador da base e adiciona ao MOI. */
+function selecionarMoiDaBase(jsonStr) {
+  const c = JSON.parse(jsonStr);
+  document.getElementById('moiSugestoes').style.display = 'none';
+  document.getElementById('moiBuscaBase').value = '';
+
+  const jaExiste = moiState.lista.some(m => m.nome.toLowerCase() === c.nome.toLowerCase());
+  if (jaExiste) { showToast('Colaborador já está na lista MOI.', 'warning'); return; }
+
+  moiState.lista.push({ nome: c.nome, cpf: c.cpf || '', matricula: c.matricula || '', cargo: c.cargo || '', origem: 'Base' });
+  renderMoiTable();
+  showToast(`${c.nome} adicionado ao MOI (da base).`, 'success');
+}
+
+/** Seleciona o primeiro item das sugestões. */
+function selecionarPrimeiroMoi() {
+  const primeiro = document.querySelector('#moiSugestoes div');
+  if (primeiro) {
+    primeiro.click();
+  } else {
+    adicionarMoiManual();
+  }
+}
+
+/** Remove um colaborador do MOI pelo índice. */
+function removerMoi(idx) {
+  moiState.lista.splice(idx, 1);
+  renderMoiTable();
+}
+
+/** Copia os CPFs da lista MOI para a área de transferência. */
+function copiarCpfsMoi() {
+  const cpfs = moiState.lista.filter(m => m.cpf).map(m => m.cpf);
+  if (!cpfs.length) { showToast('Nenhum CPF disponível na lista MOI.', 'warning'); return; }
+  navigator.clipboard.writeText(cpfs.join('\n')).then(() => {
+    showToast(`✅ ${cpfs.length} CPF(s) MOI copiado(s)!`, 'success');
+  }).catch(() => showToast('Falha ao copiar.', 'error'));
+}
+
+/** Limpa toda a lista MOI. */
+function limparMoi() {
+  moiState.lista = [];
+  renderMoiTable();
+  showToast('Lista MOI limpa.', 'info');
+}
+
+/** Renderiza a tabela de MOI. */
+function renderMoiTable() {
+  const tbody     = document.getElementById('moiTbody');
+  const wrapper   = document.getElementById('moiTableWrapper');
+  const emptyEl   = document.getElementById('moiEmptyState');
+
+  if (!moiState.lista.length) {
+    wrapper.style.display   = 'none';
+    emptyEl.style.display   = 'block';
+    return;
+  }
+
+  wrapper.style.display   = 'block';
+  emptyEl.style.display   = 'none';
+
+  tbody.innerHTML = moiState.lista.map((m, i) => `
+    <tr>
+      <td style="font-family:'JetBrains Mono'; font-size:12px; color:var(--text-muted);">${i + 1}</td>
+      <td style="font-weight:600;">${escapeHtml(m.nome)}</td>
+      <td style="font-family:'JetBrains Mono'; font-size:12px;">${escapeHtml(m.cpf) || '<span style="color:var(--text-muted);">—</span>'}</td>
+      <td style="font-family:'JetBrains Mono'; font-size:12px;">${escapeHtml(m.matricula) || '<span style="color:var(--text-muted);">—</span>'}</td>
+      <td style="font-size:12px; color:var(--text-secondary);">${escapeHtml(m.cargo) || '—'}</td>
+      <td>
+        <span class="badge badge-${m.origem === 'Base' ? 'success' : 'info'}" style="font-size:10px;">
+          ${m.origem}
+        </span>
+      </td>
+      <td>
+        <button class="btn btn-ghost btn-sm" style="color:var(--error-500); padding:4px 8px;"
+          onclick="removerMoi(${i})" title="Remover">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14H6L5 6"/>
+          </svg>
+        </button>
+      </td>
+    </tr>
+  `).join('');
 }
 
 // ── Utilities ──────────────────────────────────

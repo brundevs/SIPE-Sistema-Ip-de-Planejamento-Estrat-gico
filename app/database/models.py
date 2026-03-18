@@ -13,15 +13,21 @@ Base = declarative_base()
 
 
 class Colaborador(Base):
-    """Tabela permanente de colaboradores importados via Excel."""
+    """
+    Tabela permanente de colaboradores importados via Excel.
+    Campos obrigatórios: nome.
+    CPF é armazenado somente com dígitos (11 chars).
+    categoria: 'MOD' (Mão de Obra Direta) ou 'MOI' (Mão de Obra Indireta).
+    """
     __tablename__ = "colaboradores"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     nome = Column(String(255), nullable=False, index=True)
-    cpf = Column(String(14), unique=True, nullable=True)       # CPF formatado
+    cpf = Column(String(11), unique=True, nullable=True)        # Apenas dígitos (11 chars)
     matricula = Column(String(50), unique=True, nullable=True)  # Matrícula
     cargo = Column(String(150), nullable=True)
     setor = Column(String(150), nullable=True)
+    categoria = Column(String(3), nullable=True)                 # 'MOD' ou 'MOI'
     ativo = Column(Boolean, default=True)
     data_importacao = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     data_atualizacao = Column(DateTime, default=lambda: datetime.now(timezone.utc),
@@ -41,6 +47,7 @@ class Colaborador(Base):
             "matricula": self.matricula,
             "cargo": self.cargo,
             "setor": self.setor,
+            "categoria": self.categoria,
             "ativo": self.ativo,
             "data_importacao": self.data_importacao.isoformat() if self.data_importacao else None,
             "data_atualizacao": self.data_atualizacao.isoformat() if self.data_atualizacao else None,

@@ -29,3 +29,12 @@ venv.bak/
 .nox
 .rspec
 .pytest_cache/
+
+# Dados de runtime — não versionar
+data/storage.db
+data/*.json
+data/uploads/
+data/temp/
+*.db
+*.sqlite
+*.sqlite3
