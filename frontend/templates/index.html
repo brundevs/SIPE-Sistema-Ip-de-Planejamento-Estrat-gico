@@ -1,0 +1,1053 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="SIPE | Sistema Ipe de Planejamento Estrategico">
+  <title>SIPE | Sistema Ipe de Planejamento Estrategico</title>
+  <link rel="stylesheet" href="/static/css/styles.css?v=3.1">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌳</text></svg>">
+</head>
+<body>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Loading overlay -->
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-content">
+      <div class="spinner spinner-lg" style="margin: 0 auto;"></div>
+      <p id="loadingText">Processando...</p>
+    </div>
+  </div>
+
+  <!-- Modal backdrop -->
+  <div class="modal-backdrop" id="modalBackdrop" onclick="closeModal()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modalTitle">Modal</h3>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+      </div>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <div class="app-layout">
+
+    <!-- ═══════ SIDEBAR ═══════ -->
+    <aside class="sidebar">
+      <div class="sidebar-header" style="justify-content: center; padding: 20px 10px; border-bottom: 1px solid var(--border-subtle);">
+        <img src="/static/img/logo.svg" alt="SIPE | Sistema Ipe de Planejamento Estrategico" style="max-height: 85px; width: 100%; object-fit: contain;">
+      </div>
+
+      <nav class="sidebar-nav">
+        <div class="nav-section">
+          <div class="nav-section-label">Módulo Planejamento</div>
+          <div class="nav-item active" data-page="dashboard" onclick="navigateTo('dashboard')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            Dashboard
+          </div>
+          <div class="nav-item" data-page="moi" onclick="navigateTo('moi')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
+            Liberação de Acessos
+          </div>
+          <div class="nav-item" data-page="clima" onclick="navigateTo('clima')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
+            Clima
+            <span class="pulse" style="margin-left: auto;"></span>
+          </div>
+          <div class="nav-item" data-page="planejamento" onclick="navigateTo('planejamento')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="14" x2="10" y2="14"/><line x1="8" y1="17" x2="14" y2="17"/></svg>
+            Planejamento de Obras
+          </div>
+          <div class="nav-item" data-page="rdo-obra" onclick="navigateTo('rdo-obra')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2z"/></svg>
+            Relatório Diário de Obra
+          </div>
+        </div>
+
+        <div class="nav-section">
+          <div class="nav-section-label">Módulo Recursos Humanos</div>
+          <div class="nav-item" data-page="rdo" onclick="navigateTo('rdo')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            Leitura PTe Cesla
+          </div>
+        </div>
+
+        <div class="nav-section">
+          <div class="nav-section-label">Módulo Segurança do Trabalho</div>
+          <div class="nav-item" style="opacity:0.5; cursor:not-allowed;" onclick="alert('Função em desenvolvimento. Ficará disponível no cadastro mestre.')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            Estatísticas e Inspeções
+          </div>
+        </div>
+
+        <div class="nav-section">
+          <div class="nav-section-label">Módulo Almoxarifado</div>
+          <div class="nav-item" style="opacity:0.5; cursor:not-allowed;" onclick="alert('Função em desenvolvimento. Ficará disponível no cadastro mestre.')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+            Inventário e Equipamentos
+          </div>
+        </div>
+      </nav>
+
+      <!-- Sidebar Footer -->
+      <div style="padding: 16px 20px; border-top: 1px solid var(--border-subtle); flex-shrink: 0;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span class="pulse"></span>
+          <span style="font-size: 11px; color: var(--text-muted);">Sistema Online</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ═══════ MAIN CONTENT ═══════ -->
+    <main class="main-content">
+
+      <!-- Topbar -->
+      <div class="topbar">
+        <div class="topbar-left">
+          <div>
+            <div class="topbar-title" id="pageTitle">Dashboard</div>
+            <div class="topbar-subtitle" id="pageSubtitle">Visão geral do sistema</div>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <div id="topbarWeather" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); cursor: pointer;" onclick="navigateTo('clima')">
+            <span id="topWeatherIcon">🌡️</span>
+            <span id="topWeatherTemp">--°C</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════ PAGE: DASHBOARD ═══════ -->
+      <div class="page-section active" id="page-dashboard">
+        <div class="page-content">
+
+          <!-- Stats -->
+          <div class="stats-grid">
+            <div class="stat-card blue">
+              <div class="stat-icon">👥</div>
+              <div class="stat-value" id="statColabs">0</div>
+              <div class="stat-label">Colaboradores</div>
+            </div>
+            <div class="stat-card purple">
+              <div class="stat-icon">📄</div>
+              <div class="stat-value" id="statProcessamentos">0</div>
+              <div class="stat-label">RDOs Processados</div>
+            </div>
+            <div class="stat-card green">
+              <div class="stat-icon">🔗</div>
+              <div class="stat-value" id="statVinculos">0</div>
+              <div class="stat-label">Vínculos Confirmados</div>
+            </div>
+            <div class="stat-card amber">
+              <div class="stat-icon">📋</div>
+              <div class="stat-value" id="statUltimo">—</div>
+              <div class="stat-label">Último RDO</div>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <!-- Quick Actions -->
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">⚡ Ações Rápidas</div>
+                  <div class="card-subtitle">Acesse as funcionalidades principais</div>
+                </div>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 10px;">
+                <button class="btn btn-primary btn-lg" style="width: 100%;" onclick="navigateTo('efetivo')">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                  Importar Planilha Excel
+                </button>
+                <button class="btn btn-secondary btn-lg" style="width: 100%;" onclick="navigateTo('rdo')">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  Leitura PTE / Cesla
+                </button>
+                <button class="btn btn-ghost btn-lg" style="width: 100%;" onclick="navigateTo('clima')">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
+                  Ver Clima Atual
+                </button>
+              </div>
+            </div>
+
+
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ═══════ PAGE: EFETIVO ═══════ -->
+      <div class="page-section" id="page-efetivo">
+        <div class="page-content">
+
+          <!-- Upload -->
+          <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header">
+              <div>
+                <div class="card-title">📤 Importar Planilha de Colaboradores</div>
+                <div class="card-subtitle">Upload de arquivo Excel (.xlsx) com dados do efetivo</div>
+              </div>
+              <button class="btn btn-ghost btn-sm" onclick="baixarModeloEfetivo()" title="Baixar planilha modelo para preenchimento" style="display:flex; align-items:center; gap:6px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Baixar Modelo
+              </button>
+            </div>
+            <div class="upload-zone" id="uploadExcelZone">
+              <input type="file" accept=".xlsx,.xls" id="excelFileInput" onchange="handleExcelUpload(this)">
+              <div class="upload-zone-icon">📊</div>
+              <div class="upload-zone-title">Arraste o arquivo Excel aqui ou clique para selecionar</div>
+              <div class="upload-zone-subtitle">Suporta .xlsx e .xls — Colunas: Nome, CPF, Matrícula, Cargo, Setor, <strong>Categoria</strong> (MOD/MOI)</div>
+            </div>
+            <!-- Avisos pós-importação (CPF inválido, categoria desconhecida, etc.) -->
+            <div id="efetivoAvisos" style="display:none; margin:12px 20px 4px; padding:12px 16px; background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.3); border-radius:8px;">
+              <div style="font-size:12px; font-weight:700; color:#d97706; text-transform:uppercase; margin-bottom:6px;">⚠️ Avisos da Importação</div>
+              <ul id="efetivoAvisosList" style="margin:0; padding-left:18px; font-size:13px; color:var(--text-secondary); line-height:1.7;"></ul>
+            </div>
+          </div>
+
+          <!-- Search & Table -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title">👥 Base de Colaboradores</div>
+                <div class="card-subtitle" id="efetivoCountLabel">0 colaboradores cadastrados</div>
+              </div>
+              <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <div class="search-wrapper">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  <input class="input" type="text" id="searchColabs" placeholder="Buscar nome, CPF..." oninput="searchColaboradores()" style="width: 220px;">
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="abrirFormAdicionarPessoa()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  Adicionar Pessoa
+                </button>
+                <button class="btn btn-ghost btn-sm" onclick="exportarPlanilhaEfetivo()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  Exportar Planilha
+                </button>
+              </div>
+            </div>
+            <div id="colabTableWrapper">
+              <div class="empty-state">
+                <div class="empty-state-icon">👥</div>
+                <div class="empty-state-title">Nenhum colaborador cadastrado</div>
+                <div class="empty-state-desc">Importe uma planilha Excel acima para começar a popular a base de dados permanente.</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ═══════ PAGE: RDO (Leitura PTE / Cesla) ═══════ -->
+      <div class="page-section" id="page-rdo">
+        <div class="page-content">
+
+          <!-- Upload PDFs -->
+          <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header">
+              <div>
+                <div class="card-title">📋 Leitura PTE / Cesla — Upload de PDFs</div>
+                <div class="card-subtitle">Faça upload de um ou mais PDFs do PTE ou Cesla para extrair colaboradores MOD (mão de obra direta)</div>
+              </div>
+              <div style="display:flex; gap:10px; align-items:center;">
+                <button class="btn btn-ghost btn-sm" onclick="limparResultadosPTE()" title="Limpar resultados">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                  Limpar
+                </button>
+              </div>
+            </div>
+            <div class="upload-zone" id="uploadPdfZone" onclick="document.getElementById('pdfFilesInput').click()" style="cursor:pointer;">
+              <input type="file" accept=".pdf" id="pdfFilesInput" multiple onchange="handlePteUpload(this)" style="display:none;">
+              <div class="upload-zone-icon">📑</div>
+              <div class="upload-zone-title">Arraste PDFs aqui ou clique para selecionar</div>
+              <div class="upload-zone-subtitle">Aceita múltiplos arquivos PDF — extrai apenas colaboradores MOD (mão de obra direta)</div>
+            </div>
+            <!-- Fila de uploads -->
+            <div id="pteUploadQueue" style="margin-top:12px; display:none;">
+              <div style="font-size:12px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:8px;">Arquivos na fila</div>
+              <div id="pteUploadList" style="display:flex; flex-direction:column; gap:6px;"></div>
+            </div>
+          </div>
+
+          <!-- Resultados agrupados por data -->
+          <div id="pteResults" style="display:none;">
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">👥 Colaboradores MOD Extraídos</div>
+                  <div class="card-subtitle" id="pteResultsSubtitle">Agrupados por data do documento, ordem alfabética</div>
+                </div>
+                <div style="display:flex; gap:8px;">
+                  <button class="btn btn-primary btn-sm" id="btnCopiarTodosCpfs" onclick="copiarTodosCpfs()" title="Copiar todos os CPFs">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    Copiar Todos os CPFs
+                  </button>
+                </div>
+              </div>
+              <div id="pteGroupsContainer"></div>
+            </div>
+          </div>
+
+          <!-- Empty state inicial -->
+          <div id="pteEmptyState">
+            <div class="empty-state">
+              <div class="empty-state-icon">📄</div>
+              <div class="empty-state-title">Nenhum PDF processado ainda</div>
+              <div class="empty-state-desc">Faça upload de um ou mais PDFs do PTE/Cesla acima para extrair os colaboradores MOD.</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ═══════ PAGE: LIBERAÇÃO DE ACESSOS ═══════ -->
+      <div class="page-section" id="page-moi">
+        <div class="page-content">
+
+          <div class="grid-2" style="gap:20px;">
+
+            <!-- Formulário -->
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">🔓 Nova Liberação de Acesso</div>
+                  <div class="card-subtitle">Preencha os dados para gerar o texto de liberação</div>
+                </div>
+                <button class="btn btn-ghost btn-sm" onclick="limparFormAcesso()">Limpar</button>
+              </div>
+
+              <div style="display:flex; flex-direction:column; gap:14px;">
+
+                <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                  <div style="flex:1 1 180px;">
+                    <label class="field-label">Local *</label>
+                    <input class="input" type="text" id="acessoLocal" placeholder="Ex: Portaria Principal">
+                  </div>
+                  <div style="flex:0 0 150px;">
+                    <label class="field-label">Data *</label>
+                    <input class="input" type="date" id="acessoData">
+                  </div>
+                </div>
+
+                <div style="position:relative;">
+                  <label class="field-label">Motorista / Nome *</label>
+                  <input class="input" type="text" id="acessoMotorista" placeholder="Nome ou CPF para buscar..." autocomplete="off" oninput="buscarAcesso(this.value)" style="width:100%;">
+                  <div id="acessoSugestoes" style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--bg-card); box-shadow:var(--shadow-xl); border:1px solid var(--border-subtle); border-radius:var(--radius-md); z-index:300; max-height:220px; overflow-y:auto; margin-top:4px;"></div>
+                </div>
+
+                <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                  <div style="flex:1 1 140px;">
+                    <label class="field-label">CPF</label>
+                    <input class="input" type="text" id="acessoCpf" placeholder="000.000.000-00">
+                  </div>
+                  <div style="flex:1 1 120px;">
+                    <label class="field-label">Placa</label>
+                    <input class="input" type="text" id="acessoPlaca" placeholder="ABC-1234" style="text-transform:uppercase;">
+                  </div>
+                </div>
+
+                <div>
+                  <label class="field-label">Empresa</label>
+                  <input class="input" type="text" id="acessoEmpresa" placeholder="Nome da empresa" style="width:100%;">
+                </div>
+
+                <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+                  <div style="flex:1;">
+                    <label class="field-label">Período</label>
+                    <div style="display:flex; gap:16px; margin-top:8px;">
+                      <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
+                        <input type="checkbox" id="acessoManha" checked style="width:16px; height:16px;"> Manhã
+                      </label>
+                      <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
+                        <input type="checkbox" id="acessoTarde" style="width:16px; height:16px;"> Tarde
+                      </label>
+                    </div>
+                  </div>
+                  <div style="flex:0 0 100px;">
+                    <label class="field-label">Quantidade</label>
+                    <input class="input" type="number" id="acessoQtd" value="1" min="1" max="99">
+                  </div>
+                </div>
+
+                <div>
+                  <label class="field-label">Motivo *</label>
+                  <input class="input" type="text" id="acessoMotivo" placeholder="Descreva o motivo do acesso" style="width:100%;">
+                </div>
+
+                <div>
+                  <label class="field-label">Gerado por</label>
+                  <input class="input" type="text" id="acessoGeradoPor" placeholder="Nome de quem está liberando" style="width:100%;">
+                </div>
+
+                <button class="btn btn-primary" onclick="gerarTextoLiberacao()" style="width:100%; margin-top:4px;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  Gerar Texto
+                </button>
+              </div>
+            </div>
+
+            <!-- Resultado -->
+            <div class="card" id="acessoResultadoCard" style="display:none;">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">📋 Texto Gerado</div>
+                  <div class="card-subtitle">Pronto para compartilhar</div>
+                </div>
+              </div>
+              <pre id="acessoTexto" style="white-space:pre-wrap; font-family: 'JetBrains Mono', monospace; font-size:13px; line-height:1.7; color:var(--text-primary); background:var(--bg-surface); padding:16px; border-radius:var(--radius-md); border:1px solid var(--border-subtle); margin-bottom:16px;"></pre>
+              <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                <button class="btn btn-primary" onclick="copiarTextoLiberacao()" style="flex:1;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  Copiar Texto
+                </button>
+                <button class="btn btn-ghost" onclick="enviarWhatsApp()" style="flex:1; color:#25d366;">
+                  <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                  Enviar WhatsApp
+                </button>
+              </div>
+            </div>
+
+            <!-- Empty state -->
+            <div id="acessoEmptyState" style="display:flex; align-items:center; justify-content:center;">
+              <div class="empty-state">
+                <div class="empty-state-icon">🔓</div>
+                <div class="empty-state-title">Preencha o formulário</div>
+                <div class="empty-state-desc">O texto de liberação aparecerá aqui após gerar.</div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Histórico de Liberações -->
+          <div class="card" style="margin-top:20px;">
+            <div class="card-header">
+              <div>
+                <div class="card-title">📋 Histórico de Liberações</div>
+                <div class="card-subtitle">Registros de acessos gerados pelo sistema</div>
+              </div>
+              <button class="btn btn-ghost btn-sm" onclick="loadHistoricoLiberacoes()">🔄 Atualizar</button>
+            </div>
+            <div id="liberacoesHistoricoContent">
+              <div class="empty-state" style="padding:30px;">
+                <div class="empty-state-icon">📋</div>
+                <div class="empty-state-title">Nenhuma liberação registrada</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ═══════ PAGE: CLIMA ═══════ -->
+      <div class="page-section" id="page-clima">
+        <div class="page-content">
+          
+          <div class="card" style="margin-bottom: 20px; border-top: 4px solid var(--primary-500);">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; gap: 16px;">
+              <div style="display: flex; align-items: center; gap: 12px; font-size: 22px; font-weight: 700; color: var(--text-primary); min-width: 0;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="var(--primary-500)" stroke-width="2" width="28" height="28" style="flex-shrink: 0;"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="21.17" y1="8" x2="12" y2="8"/><line x1="3.95" y1="6.06" x2="8.54" y2="14"/><line x1="10.88" y1="21.94" x2="15.46" y2="14"/></svg>
+                <span id="climaCityLabel" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Local</span>
+              </div>
+              <div style="display: flex; gap: 10px; flex-shrink: 0;">
+                <button class="btn btn-secondary btn-sm" onclick="openClimaSettings()" style="padding: 8px 12px;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                  Configurar
+                </button>
+                <button class="btn btn-primary btn-icon btn-sm" onclick="loadClima(true)" style="width: 36px; height: 36px; padding: 0;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Dashboard Google-like Current -->
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px;">
+              <div style="display: flex; align-items: center; gap: 24px;">
+                <div id="climaMainIcon" style="font-size: 80px; line-height: 1;">⛅</div>
+                <div style="display: flex; align-items: flex-start;">
+                  <span id="climaMainTemp" style="font-size: 64px; font-weight: 800; line-height: 1; letter-spacing: -2px; color: var(--text-primary);">--</span>
+                  <span style="font-size: 24px; font-weight: 500; margin-top: 8px; color: var(--text-secondary);">°C</span>
+                </div>
+                <div style="font-size: 13px; color: var(--text-muted); line-height: 1.6; margin-left: 12px; border-left: 1px solid var(--border-subtle); padding-left: 16px;">
+                  <div>Chuva: <span id="climaMainPrecip">0mm</span></div>
+                  <div>Umidade: <span id="climaMainHum">--%</span></div>
+                  <div>Vento: <span id="climaMainWind">-- km/h</span></div>
+                </div>
+              </div>
+              
+              <div style="text-align: right; margin-left: auto;">
+                <div style="font-size: 32px; font-weight: 600; color: var(--text-primary); letter-spacing: -1px;">Clima</div>
+                <div id="climaMainTime" style="font-size: 15px; color: var(--text-secondary); margin-bottom: 4px;">Atualizado agora</div>
+                <div id="climaMainDesc" style="font-size: 16px; color: var(--primary-600); font-weight: 500;">Carregando</div>
+              </div>
+            </div>
+
+            <div style="margin-top: 36px; border-top: 1px solid var(--border-subtle); padding-top: 24px;">
+              <!-- Week Scroll/Tabs -->
+              <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 12px; letter-spacing: 1px; display: flex; justify-content: space-between;">
+                <span>📅 Histórico e Previsão (17 dias)</span>
+                <span>Deslize para ver mais →</span>
+              </div>
+              <style>
+                #climaWeekDays::-webkit-scrollbar { height: 10px; }
+                #climaWeekDays::-webkit-scrollbar-track { background: var(--bg-hover, #f1f5f9); border-radius: 8px; }
+                #climaWeekDays::-webkit-scrollbar-thumb { background: var(--border-default, #cbd5e1); border-radius: 8px; border: 2px solid var(--bg-hover, #f1f5f9); }
+                #climaWeekDays::-webkit-scrollbar-thumb:hover { background: var(--text-muted, #94a3b8); }
+              </style>
+              <div style="display: flex; gap: 12px; overflow-x: auto; padding-bottom: 24px; scrollbar-width: thin; scrollbar-color: var(--primary-200) transparent; width: 100%;" id="climaWeekDays" class="custom-scroll">
+                <!-- Generated by JS -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Selected Day Details -->
+          <div class="card" id="climaDetailsCard">
+            <div class="card-header">
+              <div>
+                <div class="card-title" id="climaDiaSelecionado">Detalhes do Dia: Quarta-feira</div>
+                <div class="card-subtitle">Previsão detalhada para a operação do canteiro de obras</div>
+              </div>
+            </div>
+            
+            <div style="display: flex; flex-wrap: wrap; gap: 20px;">
+              <div style="flex: 1 1 340px; display: flex; justify-content: space-between; text-align: center; gap: 12px;">
+                <!-- Manhã -->
+                <div style="flex: 1; min-width: 100px; padding: 16px 12px; background: var(--bg-primary); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+                  <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Manhã</div>
+                  <div id="dtManhaIcon" style="font-size: 32px; margin: 8px 0;">☀️</div>
+                  <div id="dtManhaDesc" style="font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; line-height: 1.2; min-height: 26px;">--</div>
+                  <div id="dtManhaTemp" style="font-size: 20px; font-weight: 800; color: var(--text-primary);">--°</div>
+                  <div id="dtManhaChuva" style="font-size: 10px; color: var(--primary-500); margin-top: 4px; font-weight: 600;">💧 0mm</div>
+                </div>
+                
+                <!-- Tarde -->
+                <div style="flex: 1; min-width: 100px; padding: 16px 12px; background: var(--bg-primary); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+                  <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Tarde</div>
+                  <div id="dtTardeIcon" style="font-size: 32px; margin: 8px 0;">☀️</div>
+                  <div id="dtTardeDesc" style="font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; line-height: 1.2; min-height: 26px;">--</div>
+                  <div id="dtTardeTemp" style="font-size: 20px; font-weight: 800; color: var(--text-primary);">--°</div>
+                  <div id="dtTardeChuva" style="font-size: 10px; color: var(--primary-500); margin-top: 4px; font-weight: 600;">💧 0mm</div>
+                </div>
+                
+                <!-- Noite -->
+                <div style="flex: 1; min-width: 100px; padding: 16px 12px; background: var(--bg-primary); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+                  <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Noite</div>
+                  <div id="dtNoiteIcon" style="font-size: 32px; margin: 8px 0;">🌙</div>
+                  <div id="dtNoiteDesc" style="font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; line-height: 1.2; min-height: 26px;">--</div>
+                  <div id="dtNoiteTemp" style="font-size: 20px; font-weight: 800; color: var(--text-primary);">--°</div>
+                  <div id="dtNoiteChuva" style="font-size: 10px; color: var(--primary-500); margin-top: 4px; font-weight: 600;">💧 0mm</div>
+                </div>
+              </div>
+              
+              <div style="flex: 1 1 280px; padding: 24px; background: rgba(0, 24, 65, 0.02); border-radius: var(--radius-lg); border: 1px dashed var(--border-subtle); display: flex; flex-direction: column; justify-content: center;">
+                
+                <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border-subtle);">
+                  <div style="display: flex; align-items: center; gap: 12px;">
+                    <div style="width: 36px; height: 36px; border-radius: 10px; background: rgba(0,197,128,0.1); display: flex; align-items: center; justify-content: center; font-size: 18px;">🌧️</div>
+                    <div style="font-size: 14px; font-weight: 600;">Acumulado de Chuva</div>
+                  </div>
+                  <div id="dtTotalPrecip" style="font-size: 17px; font-weight: 800; font-family: 'JetBrains Mono', monospace;">-- mm</div>
+                </div>
+                
+                <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border-subtle);">
+                  <div style="display: flex; align-items: center; gap: 12px;">
+                    <div style="width: 36px; height: 36px; border-radius: 10px; background: rgba(0,231,231,0.1); display: flex; align-items: center; justify-content: center; font-size: 18px;">☔</div>
+                    <div style="font-size: 14px; font-weight: 600;">Máx. Probabilidade</div>
+                  </div>
+                  <div id="dtProbChuva" style="font-size: 17px; font-weight: 800; font-family: 'JetBrains Mono', monospace;">--%</div>
+                </div>
+                
+                <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 0;">
+                  <div style="display: flex; align-items: center; gap: 12px;">
+                    <div style="width: 36px; height: 36px; border-radius: 10px; background: rgba(245,158,11,0.1); display: flex; align-items: center; justify-content: center; font-size: 18px;">🌡️</div>
+                    <div style="font-size: 14px; font-weight: 600;">Mínima / Máxima</div>
+                  </div>
+                  <div id="dtTempRange" style="font-size: 16px; font-weight: 700; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; white-space: nowrap;">--° / --°</div>
+                </div>
+              </div>
+            </div>
+            
+          </div>
+
+        </div>
+      </div>
+      <!-- ═══════ PAGE: PLANEJAMENTO ESTRATÉGICO ═══════ -->
+      <div class="page-section" id="page-planejamento">
+        <div class="page-content">
+
+          <!-- Seções principais (nível 1) -->
+          <div style="display:flex; gap:2px; border-bottom:3px solid var(--border-subtle); margin-bottom:20px;" id="planSecoes">
+            <button class="plan-secao active" data-secao="dashboard-op" onclick="plan.secao('dashboard-op')">📊 Dashboard Operacional</button>
+            <button class="plan-secao" data-secao="cronograma" onclick="plan.secao('cronograma')">📅 Cronograma de Obra</button>
+            <button class="plan-secao" data-secao="capital" onclick="plan.secao('capital')">👤 Gestão de Capital Humano</button>
+            <button class="plan-secao" data-secao="historico-pte" onclick="plan.secao('historico-pte')">📜 Histórico PTe</button>
+          </div>
+
+          <!-- ═══ SEÇÃO: DASHBOARD OPERACIONAL ═══ -->
+          <div id="planSecDashboard">
+
+            <!-- Seletor de projeto + botões de ação -->
+            <div class="card" style="margin-bottom:20px;">
+              <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                <select class="input" id="dopProjetoSelect" onchange="plan.carregarRelatorioExecutivoInline(this.value)" style="flex:1; min-width:220px; font-size:13px;">
+                  <option value="">— Selecionar Projeto para Relatório Executivo —</option>
+                </select>
+                <button class="btn btn-ghost btn-sm" onclick="plan.relatorioExecutivo()" id="btnRelatorioExec" disabled>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  Exportar PDF
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="plan.secao('cronograma')">📅 Cronograma</button>
+                <button class="btn btn-secondary btn-sm" onclick="navigateTo('rdo-obra')">📋 RDO</button>
+              </div>
+            </div>
+
+            <!-- KPIs Efetivo + Projeto -->
+            <div class="stats-grid" style="margin-bottom:20px;">
+              <div class="stat-card blue"><div class="stat-icon">👥</div><div class="stat-value" id="dopEfetivoTotal">—</div><div class="stat-label">Efetivo Cadastrado</div></div>
+              <div class="stat-card green"><div class="stat-icon">🪖</div><div class="stat-value" id="dopMOD">—</div><div class="stat-label">MOD</div></div>
+              <div class="stat-card purple"><div class="stat-icon">📋</div><div class="stat-value" id="dopMOI">—</div><div class="stat-label">MOI</div></div>
+              <div class="stat-card amber"><div class="stat-icon">📄</div><div class="stat-value" id="dopUltimoPte">—</div><div class="stat-label">Último PTe</div></div>
+            </div>
+
+            <!-- Relatório Executivo Inline -->
+            <div id="execInlineContainer">
+              <div class="empty-state" style="padding:60px 40px;">
+                <div class="empty-state-icon">📊</div>
+                <div class="empty-state-title">Selecione um projeto acima</div>
+                <div class="empty-state-desc">O Relatório Executivo completo será exibido aqui automaticamente.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ═══ SEÇÃO: CRONOGRAMA DE OBRA ═══ -->
+          <div id="planSecCronograma" style="display:none;">
+
+            <!-- Toolbar cronograma -->
+            <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:18px;">
+              <select class="input" id="planProjetoSelect" onchange="plan.selecionarProjeto(this.value)" style="width:240px;">
+                <option value="">— Selecionar Projeto —</option>
+              </select>
+              <button class="btn btn-primary btn-sm" onclick="plan.novoProjetoModal()">+ Novo Projeto</button>
+              <button class="btn btn-ghost btn-sm" onclick="plan.importarModal()" id="btnImportar" disabled>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                Importar XML/Excel
+              </button>
+              <button class="btn btn-ghost btn-sm" onclick="plan.exportar()" id="btnExportar" disabled>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Exportar Excel
+              </button>
+              <a class="btn btn-ghost btn-sm" href="/api/projetos/0/modelo-csv" style="text-decoration:none;" onclick="event.stopPropagation()">Modelo CSV</a>
+              <button class="btn btn-ghost btn-sm" onclick="plan.deletarProjeto()" id="btnDeletar" disabled style="color:var(--error-500);">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                Apagar Projeto
+              </button>
+              <button class="btn btn-secondary btn-sm" onclick="plan.relatorio()" id="btnRelatorio" disabled>📋 Relatório</button>
+              <div style="margin-left:auto; display:flex; gap:6px; flex-wrap:wrap;" id="planFiltros">
+                <button class="btn btn-ghost btn-sm plan-filtro active" data-f="tudo" onclick="plan.filtrar('tudo')">Tudo</button>
+                <button class="btn btn-ghost btn-sm plan-filtro" data-f="s-1" onclick="plan.filtrar('s-1')">S-1</button>
+                <button class="btn btn-ghost btn-sm plan-filtro" data-f="s0"  onclick="plan.filtrar('s0')">S+0</button>
+                <button class="btn btn-ghost btn-sm plan-filtro" data-f="s1"  onclick="plan.filtrar('s1')">S+1</button>
+                <button class="btn btn-ghost btn-sm plan-filtro" data-f="s2"  onclick="plan.filtrar('s2')">S+2</button>
+              </div>
+            </div>
+
+            <!-- Sub-tabs do cronograma (nível 2) -->
+            <div style="display:flex; gap:2px; border-bottom:2px solid var(--border-subtle); margin-bottom:16px;" id="planTabs">
+              <button class="plan-tab active" data-tab="gantt" onclick="plan.tab('gantt')">📊 Gantt</button>
+              <button class="plan-tab" data-tab="curvas" onclick="plan.tab('curvas')">📈 Curva S</button>
+              <button class="plan-tab" data-tab="histograma" onclick="plan.tab('histograma')">👷 Histograma</button>
+              <button class="plan-tab" data-tab="lista" onclick="plan.tab('lista')">📋 Lista</button>
+              <button class="plan-tab" data-tab="editor" onclick="plan.tab('editor')">✏️ Editor</button>
+            </div>
+
+            <!-- TAB: GANTT -->
+            <div id="planTabGantt">
+              <div class="card" style="padding:0; overflow:hidden;">
+                <div id="ganttContainer" style="height:580px; display:flex; flex-direction:column; overflow:hidden;">
+                  <div class="empty-state" style="padding:60px;"><div class="empty-state-icon">📊</div><div class="empty-state-title">Selecione um projeto para visualizar o Gantt</div></div>
+                </div>
+              </div>
+              <div style="display:flex; gap:14px; margin-top:10px; font-size:12px; color:var(--text-muted);">
+                <span style="display:flex; align-items:center; gap:5px;"><span style="width:24px; height:10px; background:rgba(59,130,246,0.6); border:1px solid #2563eb; border-radius:3px; display:inline-block;"></span>Baseline (Previsto)</span>
+                <span style="display:flex; align-items:center; gap:5px;"><span style="width:24px; height:10px; background:rgba(34,197,94,0.6); border:1px solid #16a34a; border-radius:3px; display:inline-block;"></span>Real</span>
+                <span style="display:flex; align-items:center; gap:5px;"><span style="width:24px; height:10px; background:rgba(239,68,68,0.5); border:1px solid #dc2626; border-radius:3px; display:inline-block;"></span>Caminho Crítico</span>
+                <span style="display:flex; align-items:center; gap:5px;"><span style="width:2px; height:14px; background:#ef4444; display:inline-block;"></span>Hoje</span>
+              </div>
+            </div>
+
+            <!-- TAB: CURVA S -->
+            <div id="planTabCurvas" style="display:none;">
+              <div class="card">
+                <div class="card-header"><div><div class="card-title">📈 Curva de Avanço Físico (Curva S)</div><div class="card-subtitle">% Acumulado Previsto vs. Real</div></div></div>
+                <div style="position:relative; height:360px;"><canvas id="curvaSChart"></canvas></div>
+                <div id="curvaSDesvio" style="margin-top:16px; display:none;"></div>
+              </div>
+            </div>
+
+            <!-- TAB: HISTOGRAMA -->
+            <div id="planTabHistograma" style="display:none;">
+              <div class="grid-2" style="gap:16px;">
+                <div class="card">
+                  <div class="card-header"><div><div class="card-title">👷 Mão de Obra</div><div class="card-subtitle">Previsto vs. Real por semana</div></div></div>
+                  <div style="position:relative; height:280px;"><canvas id="histMoChart"></canvas></div>
+                </div>
+                <div class="card">
+                  <div class="card-header"><div><div class="card-title">🚜 Equipamentos</div><div class="card-subtitle">Previsto vs. Real por semana</div></div></div>
+                  <div style="position:relative; height:280px;"><canvas id="histEqChart"></canvas></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- TAB: LISTA -->
+            <div id="planTabLista" style="display:none;">
+              <div class="card" style="padding:0;">
+                <div id="planListaWrapper">
+                  <div class="empty-state" style="padding:40px;"><div class="empty-state-icon">📋</div><div class="empty-state-title">Selecione um projeto</div></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- TAB: EDITOR -->
+            <div id="planTabEditor" style="display:none;">
+              <div class="card" style="padding:0; overflow:hidden;">
+                <div style="display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--border-subtle); background:var(--bg-secondary); flex-wrap:wrap;">
+                  <button class="btn btn-secondary btn-sm" onclick="plan.adicionarTarefa()">➕ Adicionar Linha</button>
+                  <button class="btn btn-secondary btn-sm" onclick="plan.recalcular()">🔄 Recalcular Datas</button>
+                  <div style="flex:1; display:flex; align-items:center; gap:14px; font-size:11px; color:var(--text-muted); flex-wrap:wrap;">
+                    <span style="display:inline-flex; align-items:center; gap:4px;"><span style="width:10px; height:10px; background:rgba(59,130,246,0.15); border:1px solid #93c5fd; border-radius:2px; display:inline-block;"></span>Previsto (Baseline)</span>
+                    <span style="display:inline-flex; align-items:center; gap:4px;"><span style="width:10px; height:10px; background:rgba(34,197,94,0.15); border:1px solid #86efac; border-radius:2px; display:inline-block;"></span>Datas Reais</span>
+                  </div>
+                  <button class="btn btn-primary" onclick="plan.salvarEditor()">💾 Salvar Tudo</button>
+                </div>
+                <div id="planEditorWrapper">
+                  <div class="empty-state" style="padding:40px;"><div class="empty-state-icon">✏️</div><div class="empty-state-title">Selecione um projeto para editar o cronograma</div></div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- ═══ SEÇÃO: GESTÃO DE CAPITAL HUMANO ═══ -->
+          <div id="planSecCapital" style="display:none;">
+
+            <!-- Tabs capital humano -->
+            <div style="display:flex; gap:2px; border-bottom:2px solid var(--border-subtle); margin-bottom:20px;" id="cadTabs">
+              <button class="plan-tab active" data-tab="equipamentos" onclick="cad.tab('equipamentos')">🔧 Equipamentos</button>
+              <button class="plan-tab" data-tab="veiculos" onclick="cad.tab('veiculos')">🚗 Veículos</button>
+              <button class="plan-tab" data-tab="terceiros" onclick="cad.tab('terceiros')">🤝 Terceiros</button>
+              <button class="plan-tab" data-tab="efetivo" onclick="cad.tab('efetivo')">👷 Efetivo Próprio</button>
+            </div>
+
+            <!-- TAB: EQUIPAMENTOS -->
+            <div id="cadTabEquipamentos">
+              <div class="card">
+                <div class="card-header">
+                  <div><div class="card-title">🔧 Equipamentos</div><div class="card-subtitle">Máquinas e equipamentos cadastrados</div></div>
+                  <div style="display:flex; gap:8px; align-items:center; margin-left:auto;">
+                    <input class="input" type="text" id="cadEqSearch" placeholder="Buscar..." oninput="cad.buscar('eq')" style="width:180px;">
+                    <button class="btn btn-primary btn-sm" onclick="cad.novoModal('eq')">+ Adicionar</button>
+                  </div>
+                </div>
+                <div id="cadEqLista"><div class="empty-state" style="padding:40px;"><div class="empty-state-icon">🔧</div><div class="empty-state-title">Nenhum equipamento cadastrado</div></div></div>
+              </div>
+            </div>
+
+            <!-- TAB: VEÍCULOS -->
+            <div id="cadTabVeiculos" style="display:none;">
+              <div class="card">
+                <div class="card-header">
+                  <div><div class="card-title">🚗 Veículos</div><div class="card-subtitle">Frota própria e terceirizada</div></div>
+                  <div style="display:flex; gap:8px; align-items:center; margin-left:auto;">
+                    <input class="input" type="text" id="cadVeicSearch" placeholder="Buscar..." oninput="cad.buscar('veic')" style="width:180px;">
+                    <button class="btn btn-primary btn-sm" onclick="cad.novoModal('veic')">+ Adicionar</button>
+                  </div>
+                </div>
+                <div id="cadVeicLista"><div class="empty-state" style="padding:40px;"><div class="empty-state-icon">🚗</div><div class="empty-state-title">Nenhum veículo cadastrado</div></div></div>
+              </div>
+            </div>
+
+            <!-- TAB: TERCEIROS -->
+            <div id="cadTabTerceiros" style="display:none;">
+              <div class="card">
+                <div class="card-header">
+                  <div><div class="card-title">🤝 Terceiros</div><div class="card-subtitle">Prestadores, empresas e visitantes</div></div>
+                  <div style="display:flex; gap:8px; align-items:center; margin-left:auto;">
+                    <input class="input" type="text" id="cadTercSearch" placeholder="Buscar..." oninput="cad.buscar('terc')" style="width:180px;">
+                    <button class="btn btn-primary btn-sm" onclick="cad.novoModal('terc')">+ Adicionar</button>
+                  </div>
+                </div>
+                <div id="cadTercLista"><div class="empty-state" style="padding:40px;"><div class="empty-state-icon">🤝</div><div class="empty-state-title">Nenhum terceiro cadastrado</div></div></div>
+              </div>
+            </div>
+
+            <!-- TAB: EFETIVO PRÓPRIO -->
+            <div id="cadTabEfetivo" style="display:none;">
+              <div class="card" style="margin-bottom:16px;">
+                <div class="card-header">
+                  <div>
+                    <div class="card-title">📤 Importar Planilha de Colaboradores</div>
+                    <div class="card-subtitle">Upload de arquivo Excel (.xlsx) com dados do efetivo</div>
+                  </div>
+                  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button class="btn btn-ghost btn-sm" onclick="baixarModeloEfetivo()">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                      Baixar Modelo
+                    </button>
+                    <button class="btn btn-ghost btn-sm" onclick="exportarPlanilhaEfetivo()">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                      Exportar Excel
+                    </button>
+                  </div>
+                </div>
+                <div class="upload-zone" id="uploadExcelZone2">
+                  <input type="file" accept=".xlsx,.xls" id="excelFileInput2" onchange="handleExcelUpload(this)">
+                  <div class="upload-zone-icon">📊</div>
+                  <div class="upload-zone-title">Arraste o arquivo Excel aqui ou clique para selecionar</div>
+                  <div class="upload-zone-subtitle">Suporta .xlsx e .xls — Colunas: Nome, CPF, Matrícula, Cargo, Setor, <strong>Categoria</strong> (MOD/MOI)</div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-header">
+                  <div><div class="card-title">👷 Efetivo Próprio</div><div class="card-subtitle" id="cadEfetCount">Colaboradores da empresa</div></div>
+                  <div style="display:flex; gap:8px; align-items:center; margin-left:auto;">
+                    <input class="input" type="text" id="cadEfetSearch" placeholder="Buscar nome ou CPF..." oninput="cad.buscar('efet')" style="width:200px;">
+                    <button class="btn btn-primary btn-sm" onclick="abrirFormAdicionarPessoa()">+ Adicionar</button>
+                  </div>
+                </div>
+                <div id="cadEfetLista"><div class="empty-state" style="padding:40px;"><div class="empty-state-icon">👷</div><div class="empty-state-title">Carregando...</div></div></div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- ═══ SEÇÃO: HISTÓRICO PTe ═══ -->
+          <div id="planSecHistorico" style="display:none;">
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">📜 Histórico de Processamentos PTe</div>
+                  <div class="card-subtitle">Todos os RDOs processados pelo sistema</div>
+                </div>
+                <div class="search-wrapper" style="margin-left:auto;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  <input class="input" type="text" id="searchHistorico" placeholder="Pesquisar por nome ou matrícula..." onkeydown="if(event.key==='Enter') loadHistorico()" oninput="onHistoricoSearch()" style="width: 280px;">
+                  <button class="btn btn-secondary btn-sm" onclick="loadHistorico()">Buscar</button>
+                </div>
+              </div>
+              <div id="historicoContent">
+                <div class="empty-state">
+                  <div class="empty-state-icon">📜</div>
+                  <div class="empty-state-title">Nenhum processamento registrado</div>
+                  <div class="empty-state-desc">Processe um RDO para ver o histórico aqui.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ═══════ PAGE: RELATÓRIO DIÁRIO DE OBRA ═══════ -->
+      <div class="page-section" id="page-rdo-obra">
+        <div class="page-content">
+
+          <!-- Seleção de data e projeto -->
+          <div class="card" style="margin-bottom:20px;">
+            <div class="card-header">
+              <div>
+                <div class="card-title">📋 Relatório Diário de Obra (RDO)</div>
+                <div class="card-subtitle">Selecione a data e o projeto para montar o RDO automaticamente</div>
+              </div>
+            </div>
+            <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end;">
+              <div style="flex:0 0 180px;">
+                <label class="field-label">Data do RDO *</label>
+                <input class="input" type="date" id="rdoDataInput" style="width:100%;">
+              </div>
+              <div style="flex:1; min-width:200px;">
+                <label class="field-label">Projeto (Cronograma)</label>
+                <select class="input" id="rdoProjetoSelect" style="width:100%;">
+                  <option value="">— Sem projeto vinculado —</option>
+                </select>
+              </div>
+              <button class="btn btn-primary" onclick="rdoObra.buscarDados()" style="height:38px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                Gerar RDO
+              </button>
+              <button class="btn btn-ghost" onclick="rdoObra.limpar()" style="height:38px;">Limpar</button>
+            </div>
+          </div>
+
+          <!-- Corpo do RDO (exibido após carregar dados) -->
+          <div id="rdoObraBody" style="display:none;">
+
+            <!-- HORÁRIOS -->
+            <div class="card" style="margin-bottom:16px;">
+              <div class="card-header">
+                <div class="card-title">⏰ Horários</div>
+              </div>
+              <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:14px;">
+                <div>
+                  <label class="field-label">Início de Atividade</label>
+                  <input class="input" type="time" id="rdoInicioAtividade" style="width:100%;">
+                </div>
+                <div>
+                  <label class="field-label">Fim de Atividade</label>
+                  <input class="input" type="time" id="rdoFimAtividade" style="width:100%;">
+                </div>
+                <div>
+                  <label class="field-label">Início de Intervalo</label>
+                  <input class="input" type="time" id="rdoInicioIntervalo" value="12:00" style="width:100%;">
+                </div>
+                <div>
+                  <label class="field-label">Fim de Intervalo</label>
+                  <input class="input" type="time" id="rdoFimIntervalo" value="13:00" style="width:100%;">
+                </div>
+              </div>
+            </div>
+
+            <!-- CLIMA -->
+            <div class="card" style="margin-bottom:16px;">
+              <div class="card-header">
+                <div class="card-title">🌤️ Clima</div>
+                <div id="rdoClimaLoading" style="font-size:12px; color:var(--text-muted);">Carregando dados reais...</div>
+              </div>
+              <div style="display:grid; grid-template-columns:repeat(2,1fr) auto; gap:14px; align-items:end;">
+                <div>
+                  <label class="field-label">Manhã</label>
+                  <select class="input" id="rdoClimaManha" style="width:100%;">
+                    <option value="Bom">Bom</option>
+                    <option value="Nublado">Nublado</option>
+                    <option value="Chuvoso">Chuvoso</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="field-label">Tarde</label>
+                  <select class="input" id="rdoClimaTarde" style="width:100%;">
+                    <option value="Bom">Bom</option>
+                    <option value="Nublado">Nublado</option>
+                    <option value="Chuvoso">Chuvoso</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="field-label">Noite</label>
+                  <select class="input" id="rdoClimaNoite" style="width:100%;">
+                    <option value="Bom">Bom</option>
+                    <option value="Nublado">Nublado</option>
+                    <option value="Chuvoso">Chuvoso</option>
+                  </select>
+                </div>
+                <div style="grid-column: span 3 / span 3; max-width:200px;">
+                  <label class="field-label">Precipitação (mm)</label>
+                  <input class="input" type="number" step="0.1" min="0" id="rdoPrecipitacao" value="0" style="width:100%;">
+                </div>
+              </div>
+            </div>
+
+            <!-- EFETIVO -->
+            <div class="card" style="margin-bottom:16px;">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">👷 Efetivo</div>
+                  <div class="card-subtitle" id="rdoEfetivoCount">Colaboradores presentes na data</div>
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="rdoObra.copiarCPFs()" id="btnRdoCopiarCpfs">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  Copiar CPFs
+                </button>
+              </div>
+              <div id="rdoEfetivoTable">
+                <div class="empty-state" style="padding:30px;"><div class="empty-state-icon">👷</div><div class="empty-state-title">Nenhum efetivo encontrado para esta data</div></div>
+              </div>
+            </div>
+
+            <!-- ATIVIDADES -->
+            <div class="card" style="margin-bottom:16px;">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">🔨 Atividades</div>
+                  <div class="card-subtitle">Serviços executados — baseados no cronograma do dia</div>
+                </div>
+              </div>
+              <div id="rdoAtividadesContainer" style="display:flex; flex-direction:column; gap:12px;"></div>
+              <div style="margin-top:16px;">
+                <label class="field-label">Outras Atividades (não mapeadas no cronograma)</label>
+                <textarea class="input" id="rdoOutrasAtividades" rows="3" placeholder="Descreva atividades extras realizadas no dia..." style="width:100%; resize:vertical; font-size:13px; line-height:1.6;"></textarea>
+              </div>
+            </div>
+
+            <!-- PERMISSÕES DE TRABALHO -->
+            <div class="card" style="margin-bottom:16px;">
+              <div class="card-header">
+                <div class="card-title">🛡️ Permissões de Trabalho</div>
+              </div>
+              <div id="rdoPermissoesContainer">
+                <div class="empty-state" style="padding:30px;"><div class="empty-state-icon">🛡️</div><div class="empty-state-title">Nenhuma PT extraída para esta data</div></div>
+              </div>
+              <div style="margin-top:12px;">
+                <label class="field-label">Adicionar PT manual</label>
+                <div style="display:flex; gap:8px;">
+                  <input class="input" type="text" id="rdoPtNumeroManual" placeholder="Número da PT (ex: 190026)" style="width:180px;">
+                  <input class="input" type="text" id="rdoPtDescManual" placeholder="Descrição das atividades..." style="flex:1;">
+                  <button class="btn btn-secondary btn-sm" onclick="rdoObra.adicionarPtManual()">+ Adicionar</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- BOTÃO GERAR RELATÓRIO FINAL -->
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title">📄 Texto Final do RDO</div>
+              </div>
+              <div style="margin-bottom:12px; display:flex; gap:10px; flex-wrap:wrap;">
+                <button class="btn btn-primary" onclick="rdoObra.gerarTexto()">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                  Montar Texto RDO
+                </button>
+                <button class="btn btn-ghost" onclick="rdoObra.copiarTexto()" id="btnRdoCopiarTexto" disabled>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  Copiar Texto
+                </button>
+              </div>
+              <textarea id="rdoTextoFinal" readonly rows="20" style="width:100%; font-family:'JetBrains Mono',monospace; font-size:12px; line-height:1.7; background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:var(--radius-md); padding:14px; color:var(--text-primary); resize:vertical; display:none;"></textarea>
+            </div>
+
+          </div><!-- /rdoObraBody -->
+
+          <!-- Empty state inicial -->
+          <div id="rdoObraEmpty">
+            <div class="empty-state" style="padding:80px 40px;">
+              <div class="empty-state-icon">📋</div>
+              <div class="empty-state-title">Selecione uma data para começar</div>
+              <div class="empty-state-desc">O sistema irá puxar automaticamente os dados do Histórico PTe, clima real e atividades do cronograma para montar o RDO.</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ═════════ MODAL: VER DETALHES HISTÓRICO ═════════ -->
+  <div id="viewHistModal" onclick="if(event.target===this) this.style.display='none'">
+    <div style="max-width:850px; width: 95%; max-height: 85vh; display:flex; flex-direction:column; background:var(--bg-secondary); border:1px solid var(--border-default); border-radius:var(--radius-xl); padding:28px; box-shadow:var(--shadow-xl); overflow-y:auto;">
+      <h3 style="margin-bottom:15px; font-size:18px; font-weight:700; color:var(--text-primary);" id="histModalTitle">Detalhes</h3>
+      <div id="histModalBody" style="overflow-y:auto; flex:1; margin-bottom:15px; padding-right:10px;"></div>
+      <div style="display:flex; justify-content:flex-end;">
+        <button class="btn btn-secondary" onclick="document.getElementById('viewHistModal').style.display='none'">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Relatório Executivo — div oculto usado para impressão PDF -->
+  <div id="relExecPrintArea" style="display:none;">
+    <div id="relExecContent"></div>
+  </div>
+
+  <script src="/static/js/app.js?v=16.0"></script>
+</body>
+</html>

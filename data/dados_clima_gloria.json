@@ -1,0 +1,41 @@
+{
+  "cidade": "Gloria do Goita, PE",
+  "atualizado_em": "2026-03-18T14:44:02.103201+00:00",
+  "atual": {
+    "temperatura": 30.2,
+    "sensacao_termica": 34.5,
+    "umidade": 61,
+    "precipitacao": 0.0,
+    "vento_velocidade": 13.8,
+    "vento_direcao": 129,
+    "codigo_clima": 2,
+    "descricao": "Parcialmente nublado",
+    "icone": "⛅"
+  },
+  "previsao": [
+    {
+      "data": "2026-03-18",
+      "temp_max": 30.6,
+      "temp_min": 22.7,
+      "precipitacao": 0.9,
+      "descricao": "Pancadas leves",
+      "icone": "🌦️"
+    },
+    {
+      "data": "2026-03-19",
+      "temp_max": 32.6,
+      "temp_min": 22.5,
+      "precipitacao": 0.0,
+      "descricao": "Nevoeiro",
+      "icone": "🌫️"
+    },
+    {
+      "data": "2026-03-20",
+      "temp_max": 32.5,
+      "temp_min": 22.8,
+      "precipitacao": 0.1,
+      "descricao": "Nevoeiro",
+      "icone": "🌫️"
+    }
+  ]
+}

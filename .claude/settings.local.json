@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from app.database.models import Base, Colaborador, HistoricoTerceiro; print\\(''Models OK''\\)\")",
+      "Bash(python -c \"from app.web.routes import api; print\\(''Routes OK''\\)\")",
+      "Bash(python -c \":*)",
+      "Bash(python main.py)",
+      "Bash(pkill -f \"python main.py\")",
+      "Bash(python -c \"from app.web.routes import api; print\\(''routes OK''\\)\")",
+      "Bash(python -c \"from app.web.routes import api; print\\(''OK''\\)\")",
+      "Bash(python -m py_compile app/web/routes.py)",
+      "Bash(python -m py_compile app/database/models.py)",
+      "Bash(python -c \"from app.database.session import init_db; init_db\\(\\); print\\(''OK''\\)\")",
+      "Bash(\"C:\\\\Users\\\\IPE\\\\Downloads\\\\SIPE-MAIN\\\\frontend\\\\static\\\\css\\\\styles.css\":*)",
+      "Bash(python -c \"from app.web.routes import api; print\\(''[OK] routes importado''\\)\")",
+      "Bash(python -c \"from app.database.session import init_db; init_db\\(\\)\")",
+      "Bash(python -c \"from app.database.models import PermissaoTrabalho; print\\(''models OK''\\)\")",
+      "Bash(python -c \"from app.core.pdf_extractor import extrair_permissoes_trabalho; print\\(''pdf_extractor OK''\\)\")",
+      "Bash(ls:*)",
+      "Bash(gh auth:*)",
+      "Bash(git config:*)",
+      "Bash(curl -s http://localhost:5000 -o /dev/null -w \"%{http_code}\")",
+      "Bash(git credential-manager:*)",
+      "Bash(git init:*)",
+      "Bash(\"C:\\\\Users\\\\IPE\\\\Downloads\\\\SIPE-MAIN\\\\.gitignore\":*)"
+    ]
+  }
+}
