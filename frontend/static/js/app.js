@@ -1,5 +1,5 @@
 /**
- * RDO Pro Max 2.0 — Dashboard Application Logic
+ * SIPE | Sistema Ipê de Planejamento Estratégico — Dashboard Application Logic
  * Client-side JS for SPA routing, API calls, and UI interactivity.
  */
 
@@ -41,7 +41,7 @@ function navigateTo(page) {
   if (page === 'dashboard') loadDashboard();
   if (page === 'efetivo') loadColaboradores();
   if (page === 'clima') loadClima();
-  if (page === 'historico') { loadHistorico(); loadLogs(); }
+  if (page === 'historico') { loadHistorico(); }
 
   // Push state for back/forward
   history.pushState({ page }, '', `/${page === 'dashboard' ? '' : page}`);
@@ -127,19 +127,7 @@ async function loadDashboard() {
       document.getElementById('statUltimo').textContent = dt.toLocaleDateString('pt-BR');
     }
 
-    // Logs
-    const logsContainer = document.getElementById('dashboardLogs');
-    if (data.logs_recentes && data.logs_recentes.length > 0) {
-      logsContainer.innerHTML = data.logs_recentes.map(log => `
-        <div class="log-item">
-          <div class="log-dot ${log.tipo}"></div>
-          <div style="flex: 1;">
-            <div class="log-text">${escapeHtml(log.mensagem)}</div>
-            <div class="log-time">${formatDate(log.data)}</div>
-          </div>
-        </div>
-      `).join('');
-    }
+    // Logs removed from dashboard
   } catch (e) {
     console.log('Dashboard load error:', e);
   }
@@ -236,6 +224,7 @@ async function loadColaboradores(busca = '') {
               <th>Matrícula</th>
               <th>Cargo</th>
               <th>Setor</th>
+              <th>Categoria</th>
               <th>Importado em</th>
               <th></th>
             </tr>
@@ -248,6 +237,14 @@ async function loadColaboradores(busca = '') {
                 <td><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px;">${escapeHtml(c.matricula || '—')}</span></td>
                 <td>${escapeHtml(c.cargo || '—')}</td>
                 <td>${escapeHtml(c.setor || '—')}</td>
+                <td>
+                  <button class="badge badge-${c.categoria === 'MOI' ? 'info' : 'success'}" 
+                          style="cursor: pointer; border: none; padding: 4px 8px;"
+                          onclick="toggleCategoria(${c.id}, '${escapeHtml(c.categoria || 'MOD')}')"
+                          title="Clique para alternar MOD/MOI">
+                    ${escapeHtml(c.categoria || 'MOD')}
+                  </button>
+                </td>
                 <td style="font-size: 12px; color: var(--text-muted);">${formatDate(c.data_importacao)}</td>
                 <td>
                   <button class="btn btn-ghost btn-sm" onclick="deleteColaborador(${c.id}, '${escapeHtml(c.nome)}')" title="Desativar">
@@ -282,6 +279,22 @@ async function deleteColaborador(id, nome) {
     loadColaboradores();
   } catch (e) {
     showToast(`Erro: ${e.message}`, 'error');
+  }
+}
+
+async function toggleCategoria(id, atual) {
+  const nova = atual === 'MOI' ? 'MOD' : 'MOI';
+  try {
+    await apiCall(`/api/efetivo/colaboradores/${id}/categoria`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ categoria: nova })
+    });
+    showToast(`Categoria atualizada para ${nova}`, 'success');
+    const b = document.getElementById('searchColabs');
+    loadColaboradores(b ? b.value : '');
+  } catch (e) {
+    showToast(`Erro ao atualizar: ${e.message}`, 'error');
   }
 }
 
@@ -464,19 +477,24 @@ async function handlePteUpload(input) {
     formData.append('file', file);
 
     try {
-      const data = await apiCall('/api/pte/processar', { method: 'POST', body: formData });
+      const respData = await apiCall('/api/pte/processar', { method: 'POST', body: formData });
+      
+      let totCols = 0;
+      if (respData.resultados) {
+        for (const res of respData.resultados) {
+          const dataDoc = res.data || 'Sem Data';
+          const key = `${dataDoc}|${res.inicio || ''}|${res.fim || ''}`;
+          if (!pteAcumulado[key]) pteAcumulado[key] = [];
 
-      // data esperado: { data_documento: 'DD/MM/YYYY', colaboradores: [{nome,cpf,matricula,cargo}] }
-      const dataDoc = data.data_documento || 'Sem Data';
-      if (!pteAcumulado[dataDoc]) pteAcumulado[dataDoc] = [];
-
-      // Adicionar evitando duplicatas por nome+cpf
-      for (const colab of (data.colaboradores || [])) {
-        const exists = pteAcumulado[dataDoc].some(c => c.nome === colab.nome && c.cpf === colab.cpf);
-        if (!exists) pteAcumulado[dataDoc].push(colab);
+          // Adicionar evitando duplicatas por nome+cpf
+          for (const colab of (res.colaboradores || [])) {
+            const exists = pteAcumulado[key].some(c => c.nome === colab.nome && c.cpf === colab.cpf);
+            if (!exists) { pteAcumulado[key].push(colab); totCols++; }
+          }
+        }
       }
 
-      statusEl.textContent = `✓ ${(data.colaboradores || []).length} MOD extraídos`;
+      statusEl.textContent = `✓ ${totCols} MOD extraídos`;
       statusEl.className = 'badge badge-success';
 
       // Ordenar por nome dentro de cada data
@@ -512,17 +530,21 @@ function renderPteResults() {
 
   const totalColabs = datas.reduce((acc, dt) => acc + pteAcumulado[dt].length, 0);
   document.getElementById('pteResultsSubtitle').textContent =
-    `${totalColabs} colaboradores MOD em ${datas.length} documento(s)`;
+    `${totalColabs} colaboradores MOD/MOI em ${datas.length} documento(s)`;
 
   container.innerHTML = datas.map(dt => {
     const colabs = pteAcumulado[dt];
+    const [dataParte, inicioParte, fimParte] = dt.split('|');
+    const headerTimes = (inicioParte && fimParte) ? `<span style="font-size:12px; color:var(--text-secondary); margin-left:12px;">⏰ ${inicioParte} até ${fimParte}</span>` : '';
+
     return `
       <div style="margin-bottom:20px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding:0 4px;">
           <div style="display:flex;align-items:center;gap:8px;">
             <span style="font-size:16px;">📅</span>
-            <span style="font-weight:700;font-size:14px;">${escapeHtml(dt)}</span>
-            <span class="badge badge-info">${colabs.length} MOD</span>
+            <span style="font-weight:700;font-size:14px;">${escapeHtml(dataParte)}</span>
+            ${headerTimes}
+            <span class="badge badge-info" style="margin-left:8px;">${colabs.length} pessoas</span>
           </div>
           <button class="btn btn-ghost btn-sm" onclick="copiarCpfsPorData('${escapeHtml(dt)}')" title="Copiar CPFs desta data">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
@@ -538,6 +560,8 @@ function renderPteResults() {
                 <th>CPF</th>
                 <th>Matrícula</th>
                 <th>Cargo</th>
+                <th>Cat.</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -548,6 +572,13 @@ function renderPteResults() {
                   <td><span style="font-family:'JetBrains Mono',monospace;font-size:12px;">${escapeHtml(c.cpf || '—')}</span></td>
                   <td><span style="font-family:'JetBrains Mono',monospace;font-size:12px;">${escapeHtml(c.matricula || '—')}</span></td>
                   <td style="font-size:13px;">${escapeHtml(c.cargo || '—')}</td>
+                  <td><span class="badge badge-${c.categoria === 'MOI' ? 'info' : 'success'}">${escapeHtml(c.categoria || 'MOD')}</span></td>
+                  <td>
+                    <button class="btn btn-ghost btn-sm" onclick="removerColabPte('${escapeHtml(dt)}', ${i})" title="Remover dessa lista">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
+                    </button>
+                  </td>
+                </tr>
                 </tr>
               `).join('')}
             </tbody>
@@ -556,6 +587,43 @@ function renderPteResults() {
       </div>
     `;
   }).join('');
+
+  container.innerHTML += `
+    <div style="margin-top:20px; text-align:right; border-top:1px solid var(--border-subtle); padding-top:20px;">
+      <button class="btn btn-primary btn-lg" onclick="confirmarProcessamentoPte()">✅ Confirmar Processamento</button>
+    </div>
+  `;
+}
+
+function removerColabPte(dt, idx) {
+  if (pteAcumulado[dt]) {
+    pteAcumulado[dt].splice(idx, 1);
+    if (pteAcumulado[dt].length === 0) {
+      delete pteAcumulado[dt];
+    }
+  }
+  renderPteResults();
+}
+
+async function confirmarProcessamentoPte() {
+  if (Object.keys(pteAcumulado).length === 0) {
+    showToast('Não há dados para confirmar.', 'warning');
+    return;
+  }
+  showLoading('Salvando no histórico...');
+  try {
+    await apiCall('/api/pte/confirmar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ resultados: pteAcumulado })
+    });
+    hideLoading();
+    showToast('Processamento salvo no histórico!', 'success');
+    limparResultadosPTE();
+  } catch (e) {
+    hideLoading();
+    showToast(`Erro ao confirmar: ${e.message}`, 'error');
+  }
 }
 
 function copiarCpfsPorData(dt) {
@@ -1000,12 +1068,17 @@ async function salvarClimaSettings() {
     }
 }
 // ── Histórico ──────────────────────────────────
+let histProcessamentos_cache = [];
+
 async function loadHistorico() {
   try {
-    const data = await apiCall('/api/rdo/historico');
+    const buscaNome = document.getElementById('searchHistorico') ? document.getElementById('searchHistorico').value.trim() : '';
+    const qs = buscaNome ? '?busca_nome=' + encodeURIComponent(buscaNome) : '';
+    const data = await apiCall('/api/rdo/historico' + qs);
     const container = document.getElementById('historicoContent');
 
     if (data.processamentos && data.processamentos.length > 0) {
+      histProcessamentos_cache = data.processamentos;
       container.innerHTML = `
         <div class="table-wrapper">
           <table class="table">
@@ -1032,6 +1105,13 @@ async function loadHistorico() {
                   <td><span class="badge badge-error">${p.total_sem_match}</span></td>
                   <td><span class="badge badge-${p.status === 'concluido' ? 'success' : p.status === 'erro' ? 'error' : 'info'}">${p.status}</span></td>
                   <td style="text-align:center;">
+                    <button
+                      title="Ver Detalhes"
+                      onclick="viewProcessamento(${p.id})"
+                      style="background:none;border:none;cursor:pointer;color:#3b82f6;padding:4px 8px;border-radius:6px;transition:background .2s; margin-right:4px;"
+                      onmouseover="this.style.background='#dbeafe'"
+                      onmouseout="this.style.background='none'"
+                    >👁️</button>
                     <button
                       class="btn-delete-hist"
                       title="Remover este registro"
@@ -1078,243 +1158,61 @@ async function deletarProcessamento(id, nome) {
   }
 }
 
-
-
-async function loadLogs() {
-  try {
-    const data = await apiCall('/api/logs?limite=30');
-    const container = document.getElementById('logsContent');
-
-    if (data.logs && data.logs.length > 0) {
-      container.innerHTML = data.logs.map(log => `
-        <div class="log-item">
-          <div class="log-dot ${log.tipo}"></div>
-          <div style="flex: 1;">
-            <div class="log-text">
-              <span class="badge badge-${log.tipo === 'success' ? 'success' : log.tipo === 'error' ? 'error' : log.tipo === 'warning' ? 'warning' : 'info'}" style="margin-right: 6px;">${log.modulo}</span>
-              ${escapeHtml(log.mensagem)}
-            </div>
-            <div class="log-time">${formatDate(log.data)}</div>
-          </div>
-        </div>
-      `).join('');
-    }
-  } catch (e) {
-    console.error('Logs error:', e);
+function viewProcessamento(idx) {
+  const proc = histProcessamentos_cache.find(p => p.id === idx);
+  if (!proc || !proc.resultado_json) {
+      showToast('Nenhum detalhe salvo para este registro.', 'warning');
+      return;
   }
-}
-
-// ══════════════════════════════════════════════════════════════
-// PTE / CESLA — Leitura de Presença MOD
-// ══════════════════════════════════════════════════════════════
-
-/** Estado global do módulo PTE */
-const pteState = {
-  resultados: [],   // [{arquivo, data, total, colaboradores}]
-};
-
-/**
- * Chamado pelo input[type=file] ao selecionar arquivos.
- * Mostra a fila de arquivos e dispara o processamento.
- */
-async function handlePteUpload(input) {
-  const files = Array.from(input.files);
-  if (!files.length) return;
-
-  // Mostra a fila de arquivos
-  const queue = document.getElementById('pteUploadQueue');
-  const list  = document.getElementById('pteUploadList');
-  queue.style.display = 'block';
-  list.innerHTML = files.map(f => `
-    <div style="display:flex; align-items:center; gap:8px; padding:8px 12px;
-                background:var(--bg-hover); border-radius:var(--radius-sm);">
-      <svg viewBox="0 0 24 24" fill="none" stroke="var(--primary-500)" stroke-width="2" width="14" height="14">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-        <polyline points="14 2 14 8 20 8"/>
-      </svg>
-      <span style="flex:1; font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-        ${escapeHtml(f.name)}
-      </span>
-      <span style="font-size:11px; color:var(--text-muted);">${(f.size / 1024).toFixed(1)} KB</span>
-    </div>
-  `).join('');
-
-  // Esconder estado vazio e resultados anteriores
-  document.getElementById('pteEmptyState').style.display = 'none';
-  document.getElementById('pteResults').style.display = 'none';
-
-  showLoading('Extraindo colaboradores MOD dos PDFs...');
-
+  
+  let html = '';
   try {
-    const formData = new FormData();
-    files.forEach(f => formData.append('files[]', f));
-
-    const resp = await fetch('/api/pte/processar', {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
-      throw new Error(err.error || `Erro ${resp.status}`);
-    }
-
-    const data = await resp.json();
-
-    // Acumula resultados
-    if (data.resultados && data.resultados.length > 0) {
-      pteState.resultados.push(...data.resultados);
-      renderPteGroups();
-      document.getElementById('pteResults').style.display = 'block';
-
-      const total = data.resultados.reduce((s, r) => s + r.total, 0);
-      showToast(`✅ ${data.processados} arquivo(s) — ${total} colaborador(es) MOD extraído(s)`, 'success');
-    } else {
-      showToast('Nenhum colaborador MOD encontrado nos PDFs.', 'warning');
-      if (!pteState.resultados.length) {
-        document.getElementById('pteEmptyState').style.display = 'block';
+      const json = JSON.parse(proc.resultado_json);
+      if (Array.isArray(json)) {
+          html = `<pre style="font-size:12px;background:#f4f4f5;padding:10px;border-radius:6px;overflow-x:auto;">${escapeHtml(JSON.stringify(json, null, 2))}</pre>`;
+      } else {
+          for (const k of Object.keys(json)) {
+              const partes = k.split('|');
+              const d = partes[0];
+              const i = partes[1] ? partes[1] : '--:--';
+              const f = partes[2] ? partes[2] : '--:--';
+              const titulo = partes.length > 1 ? `${d} — Início: ${i} | Fim: ${f}` : k;
+              
+              html += `<div style="margin-bottom: 24px; background: #fff; padding: 16px; border-radius: 8px; border: 1px solid var(--border-subtle);">`;
+              html += `<div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;"><span style="font-size:18px;">📅</span><h4 style="margin:0; font-weight:700; color:var(--primary-600); font-size: 15px;">${escapeHtml(titulo)}</h4></div>`;
+              
+              const colabs = json[k];
+              html += `
+              <div class="table-wrapper">
+                <table class="table" style="width:100%; margin:0;">
+                  <thead><tr><th style="width:40px">#</th><th>Nome</th><th>CPF</th><th>Matrícula</th><th>Cargo/Categoria</th></tr></thead>
+                  <tbody>
+                    ${colabs.map((c, idxList) => `
+                      <tr>
+                        <td style="color:var(--text-muted); font-size:12px;">${idxList+1}</td>
+                        <td style="font-weight:600">${escapeHtml(c.nome)}</td>
+                        <td style="font-family:'JetBrains Mono', monospace; font-size:12px;">${escapeHtml(c.cpf || '—')}</td>
+                        <td style="font-family:'JetBrains Mono', monospace; font-size:12px;">${escapeHtml(c.matricula || '—')}</td>
+                        <td style="font-size:13px;">${escapeHtml(c.cargo || '—')} <span class="badge badge-info" style="margin-left:6px;">${escapeHtml(c.categoria || '')}</span></td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div></div>`;
+          }
       }
-    }
-
-    if (data.erros && data.erros.length > 0) {
-      data.erros.forEach(e => showToast(`⚠️ ${e.arquivo}: ${e.erro}`, 'error'));
-    }
-
-  } catch (err) {
-    showToast(err.message || 'Erro ao processar PDFs', 'error');
-    if (!pteState.resultados.length) {
-      document.getElementById('pteEmptyState').style.display = 'block';
-    }
-  } finally {
-    hideLoading();
-    // Reset o input para permitir re-selecionar os mesmos arquivos
-    input.value = '';
-  }
-}
-
-/**
- * Renderiza os grupos de colaboradores MOD agrupados por data do documento.
- */
-function renderPteGroups() {
-  const container = document.getElementById('pteGroupsContainer');
-  const subtitle  = document.getElementById('pteResultsSubtitle');
-
-  // Agrupar por data
-  const porData = {};
-  pteState.resultados.forEach(r => {
-    const key = r.data || 'Sem Data';
-    if (!porData[key]) porData[key] = { colaboradores: [], arquivos: [] };
-    porData[key].colaboradores.push(...r.colaboradores);
-    if (!porData[key].arquivos.includes(r.arquivo)) {
-      porData[key].arquivos.push(r.arquivo);
-    }
-  });
-
-  const totalGeral = Object.values(porData).reduce((s, g) => s + g.colaboradores.length, 0);
-  subtitle.textContent = `${totalGeral} colaborador(es) extraído(s) — agrupados por data, ordem alfabética`;
-
-  const datas = Object.keys(porData).sort((a, b) => {
-    // Ordenar datas DD/MM/YYYY descendente
-    if (a === 'Sem Data') return 1;
-    if (b === 'Sem Data') return -1;
-    const [da, ma, aa] = a.split('/');
-    const [db, mb, ab] = b.split('/');
-    return new Date(`${ab}-${mb}-${db}`) - new Date(`${aa}-${ma}-${da}`);
-  });
-
-  container.innerHTML = datas.map(data => {
-    const grupo = porData[data];
-    const colabs = [...grupo.colaboradores].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
-
-    return `
-      <div style="margin-bottom: 24px;">
-        <!-- Cabeçalho do grupo -->
-        <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px; padding:10px 14px;
-                    background:var(--primary-500)20; border-radius:var(--radius-md);
-                    border-left:4px solid var(--primary-500);">
-          <svg viewBox="0 0 24 24" fill="none" stroke="var(--primary-500)" stroke-width="2" width="16" height="16">
-            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-            <line x1="16" y1="2" x2="16" y2="6"/>
-            <line x1="8" y1="2" x2="8" y2="6"/>
-            <line x1="3" y1="10" x2="21" y2="10"/>
-          </svg>
-          <span style="font-weight:700; color:var(--primary-500);">📅 ${escapeHtml(data)}</span>
-          <span style="font-size:12px; color:var(--text-muted);">${colabs.length} colaborador(es)</span>
-          <span style="font-size:11px; color:var(--text-muted); margin-left:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-            ${grupo.arquivos.map(a => escapeHtml(a)).join(', ')}
-          </span>
-        </div>
-
-        <!-- Tabela -->
-        <div class="table-wrapper">
-          <table class="table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Nome</th>
-                <th>CPF</th>
-                <th>Matrícula</th>
-                <th>Cargo</th>
-                <th style="width:40px;"></th>
-              </tr>
-            </thead>
-            <tbody>
-              ${colabs.map((c, i) => `
-                <tr>
-                  <td style="font-family:'JetBrains Mono'; font-size:12px; color:var(--text-muted);">${i + 1}</td>
-                  <td style="font-weight:600;">${escapeHtml(c.nome)}</td>
-                  <td style="font-family:'JetBrains Mono'; font-size:12px;">${escapeHtml(c.cpf) || '<span style="color:var(--text-muted);">—</span>'}</td>
-                  <td style="font-family:'JetBrains Mono'; font-size:12px;">${escapeHtml(c.matricula) || '<span style="color:var(--text-muted);">—</span>'}</td>
-                  <td style="font-size:12px; color:var(--text-secondary);">${escapeHtml(c.cargo) || '—'}</td>
-                  <td>
-                    ${c.cpf ? `
-                      <button class="btn btn-ghost btn-sm" style="padding:4px 8px;" title="Copiar CPF"
-                        onclick="navigator.clipboard.writeText('${c.cpf}').then(()=>showToast('CPF copiado!','success'))">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
-                          <rect x="9" y="9" width="13" height="13" rx="2"/>
-                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                        </svg>
-                      </button>
-                    ` : ''}
-                  </td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    `;
-  }).join('');
-}
-
-/** Copia todos os CPFs de todos os grupos para a área de transferência. */
-function copiarTodosCpfs() {
-  const cpfs = [];
-  pteState.resultados.forEach(r => {
-    r.colaboradores.forEach(c => {
-      if (c.cpf && !cpfs.includes(c.cpf)) cpfs.push(c.cpf);
-    });
-  });
-
-  if (!cpfs.length) {
-    showToast('Nenhum CPF disponível para copiar.', 'warning');
-    return;
+  } catch(e) {
+      html = `Erro ao processar dados de visualização: ${e.message}`;
   }
 
-  navigator.clipboard.writeText(cpfs.join('\n')).then(() => {
-    showToast(`✅ ${cpfs.length} CPF(s) copiado(s)!`, 'success');
-  }).catch(() => showToast('Falha ao copiar CPFs.', 'error'));
+  document.getElementById('histModalBody').innerHTML = html;
+  document.getElementById('histModalTitle').textContent = proc.nome_arquivo || "Detalhes do RDO Processado";
+  document.getElementById('viewHistModal').style.display = 'flex';
 }
 
-/** Limpa todos os resultados do módulo PTE. */
-function limparResultadosPTE() {
-  pteState.resultados = [];
-  document.getElementById('pteResults').style.display = 'none';
-  document.getElementById('pteEmptyState').style.display = 'block';
-  document.getElementById('pteUploadQueue').style.display = 'none';
-  document.getElementById('pteGroupsContainer').innerHTML = '';
-  showToast('Resultados limpos.', 'info');
-}
+
+// -- loadLogs removed --
+
 
 
 // ══════════════════════════════════════════════════════════════

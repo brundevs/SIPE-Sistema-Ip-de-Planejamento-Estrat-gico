@@ -1,5 +1,5 @@
 """
-RDO Pro Max 2.0 - Rotas da API Web (Flask)
+SIPE | Sistema Ipê de Planejamento Estratégico - Rotas da API Web (Flask)
 Endpoints para Efetivo, RDO e Clima.
 """
 import json
@@ -14,10 +14,7 @@ import openpyxl
 
 from app.database.models import Colaborador, Vinculo, ProcessamentoRDO, LogAtividade
 from app.database.session import SessionLocal
-from app.core.pdf_extractor import (
-    extrair_texto_pdf, extrair_nomes_do_rdo, extrair_cpfs, limpar_nome,
-    extrair_colaboradores_pte, extrair_data_documento
-)
+from app.core.pdf_extractor import extrair_texto_pdf, extrair_data_documento, extrair_colaboradores_pte, extrair_cpfs, extrair_horarios_pte
 from app.core.fuzzy_engine import processar_lista_nomes, buscar_melhor_match
 from app.services.clima_service import obter_clima
 from app.services.log_service import registrar_log
@@ -88,7 +85,7 @@ def upload_excel():
                     headers["nome"] = col_idx
                 elif "CPF" in h:
                     headers["cpf"] = col_idx
-                elif "MATRÍCULA" in h or "MATRICULA" in h or h == "MAT":
+                elif "MATR" in h or "REG" in h or h in ("MAT", "RE", "CHAPA"):
                     headers["matricula"] = col_idx
                 elif "CARGO" in h or "FUNÇÃO" in h or "FUNCAO" in h:
                     headers["cargo"] = col_idx
@@ -524,11 +521,22 @@ def confirmar_vinculo():
 
 @api.route("/rdo/historico", methods=["GET"])
 def historico_processamentos():
-    """Lista histórico de processamentos."""
+    """Lista histórico de processamentos. Filtra por nome se requisitado."""
+    busca = request.args.get("busca_nome", "").strip().lower()
     db = SessionLocal()
     try:
-        procs = db.query(ProcessamentoRDO).order_by(ProcessamentoRDO.data_processamento.desc()).limit(50).all()
-        return jsonify({"processamentos": [p.to_dict() for p in procs]})
+        procs = db.query(ProcessamentoRDO).order_by(ProcessamentoRDO.data_processamento.desc()).all()
+        result = []
+        for p in procs:
+            if busca:
+                json_str = p.resultado_json or ""
+                if busca in json_str.lower():
+                    result.append(p.to_dict())
+            else:
+                result.append(p.to_dict())
+            if len(result) >= 50:
+                break
+        return jsonify({"processamentos": result})
     finally:
         db.close()
 
@@ -553,6 +561,31 @@ def deletar_processamento(proc_id):
         db.close()
 
 
+@api.route("/efetivo/colaboradores/<int:colab_id>/categoria", methods=["PUT"])
+def atualizar_categoria(colab_id):
+    """Atualiza a categoria (MOD/MOI) de um colaborador."""
+    data = request.get_json()
+    nova_categoria = data.get("categoria", "").strip().upper()
+    if nova_categoria not in ["MOD", "MOI"]:
+        return jsonify({"error": "Categoria inválida. Use MOD ou MOI."}), 400
+
+    db = SessionLocal()
+    try:
+        colab = db.query(Colaborador).get(colab_id)
+        if not colab or not colab.ativo:
+            return jsonify({"error": "Colaborador não encontrado"}), 404
+        
+        colab.categoria = nova_categoria
+        db.commit()
+        registrar_log(db, "info", "efetivo", f"Categoria atualizada para {nova_categoria}: {colab.nome}")
+        return jsonify({"success": True, "categoria": nova_categoria})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
 # ─────────────────────────────────────────────
 # PTE / CESLA (Leitura de Presença MOD)
 # ─────────────────────────────────────────────
@@ -561,79 +594,263 @@ def deletar_processamento(proc_id):
 def processar_pte():
     """
     Recebe um ou mais PDFs (campo 'files[]') do PTE/Cesla,
-    extrai colaboradores MOD e retorna lista agrupada por data do documento.
+    extrai colaboradores MOD comparando com a Base,
+    e injeta automaticamente TODOS os colaboradores MOI ativos.
     """
     arquivos = request.files.getlist("files[]")
     if not arquivos:
-        # suporte alternativo: campo 'file' singular
         arquivo_single = request.files.get("file")
         if arquivo_single:
             arquivos = [arquivo_single]
         else:
             return jsonify({"error": "Nenhum arquivo PDF enviado"}), 400
 
-    resultados = []  # lista de {arquivo, data, colaboradores}
+    resultados = []
     erros = []
 
-    for file in arquivos:
-        if not file or not file.filename:
-            continue
-
-        ext = Path(file.filename).suffix.lower()
-        if ext not in ALLOWED_EXTENSIONS_PDF:
-            erros.append({"arquivo": file.filename, "erro": "Extensão inválida (apenas .pdf)"})
-            continue
-
-        try:
-            filename = secure_filename(file.filename)
-            filepath = UPLOADS_DIR / filename
-            file.save(str(filepath))
-
-            texto = extrair_texto_pdf(str(filepath))
-            data_doc = extrair_data_documento(texto)
-            colaboradores = extrair_colaboradores_pte(texto)
-
-            # Limpar arquivo temporário
-            try:
-                os.remove(str(filepath))
-            except Exception:
-                pass
-
-            resultados.append({
-                "arquivo": file.filename,
-                "data": data_doc,
-                "total": len(colaboradores),
-                "colaboradores": colaboradores,
-            })
-
-        except Exception as e:
-            erros.append({"arquivo": file.filename, "erro": str(e)})
-            try:
-                os.remove(str(filepath))
-            except Exception:
-                pass
-
-    if not resultados and erros:
-        return jsonify({"error": "Todos os arquivos falharam", "detalhes": erros}), 400
-
-    # Log
     db = SessionLocal()
     try:
+        # Pré-carregar a base de colaboradores ativos
+        colaboradores_db = db.query(Colaborador).filter(Colaborador.ativo == True).all()
+        base_dicts = [c.to_dict() for c in colaboradores_db]
+        nomes_base = [c['nome'] for c in base_dicts]
+        
+        # Mapeia por CPF e também por Matrícula (caso o CPF tenha sido salvo na coluna de matrícula)
+        mapa_cpf = {}
+        for c in base_dicts:
+            if c.get('cpf'):
+                mapa_cpf[_limpar_cpf(c['cpf'])] = c
+            if c.get('matricula'):
+                mat_limpa = _limpar_cpf(c['matricula'])
+                if len(mat_limpa) == 11:
+                    mapa_cpf[mat_limpa] = c
+                    
+        mapa_nome = {c['nome']: c for c in base_dicts}
+        mapa_mat = {str(c['matricula']).strip(): c for c in base_dicts if c.get('matricula')}
+
+        # Coletar a lista de todos os MOI
+        mois_ativos = [c for c in base_dicts if c.get('categoria') == 'MOI']
+
+        for file in arquivos:
+            if not file or not file.filename:
+                continue
+
+            ext = Path(file.filename).suffix.lower()
+            if ext not in ALLOWED_EXTENSIONS_PDF:
+                erros.append({"arquivo": file.filename, "erro": "Extensão inválida (apenas .pdf)"})
+                continue
+
+            try:
+                filename = secure_filename(file.filename)
+                filepath = UPLOADS_DIR / filename
+                file.save(str(filepath))
+
+                texto = extrair_texto_pdf(str(filepath))
+                data_doc = extrair_data_documento(texto)
+                hr_inicio, hr_fim = extrair_horarios_pte(texto)
+                cands_heuristica = extrair_colaboradores_pte(texto)
+
+                colabs_encontrados = {}
+
+                # 1. Match candidatos da heurística contra a Base
+                for cand in cands_heuristica:
+                    cpf_cand = _limpar_cpf(cand.get('cpf', ''))
+                    if cpf_cand and cpf_cand in mapa_cpf:
+                        c = mapa_cpf[cpf_cand]
+                        colabs_encontrados[c['id']] = {
+                            "id": c['id'],
+                            "nome": c['nome'],
+                            "cpf": c.get('cpf') or c.get('matricula') or '',
+                            "matricula": c.get('matricula') or c.get('cpf') or '',
+                            "cargo": c.get('cargo', cand.get('cargo', '')),
+                            "categoria": c.get('categoria', 'MOD')
+                        }
+                        continue
+
+                    mat_cand = cand.get('matricula', '').strip()
+                    if mat_cand and mat_cand in mapa_mat:
+                        c = mapa_mat[mat_cand]
+                        colabs_encontrados[c['id']] = {
+                            "id": c['id'],
+                            "nome": c['nome'],
+                            "cpf": c.get('cpf') or c.get('matricula') or '',
+                            "matricula": c.get('matricula') or c.get('cpf') or '',
+                            "cargo": c.get('cargo', cand.get('cargo', '')),
+                            "categoria": c.get('categoria', 'MOD')
+                        }
+                        continue
+                    
+                    nm_cand = cand.get('nome', '')
+                    if nm_cand:
+                        match = buscar_melhor_match(nm_cand, nomes_base, limit=1)
+                        if match['score'] >= 65:
+                            c = mapa_nome[match['melhor_match']]
+                            colabs_encontrados[c['id']] = {
+                                "id": c['id'],
+                                "nome": c['nome'],
+                                "cpf": c.get('cpf') or c.get('matricula') or '',
+                                "matricula": c.get('matricula') or c.get('cpf') or '',
+                                "cargo": c.get('cargo', cand.get('cargo', '')),
+                                "categoria": c.get('categoria', 'MOD')
+                            }
+
+                # 2. Match por CPFs extraídos do texto inteiro
+                cpfs_inteiros = extrair_cpfs(texto)
+                for cpf_raw in cpfs_inteiros:
+                    cpf_limpo = _limpar_cpf(cpf_raw)
+                    if cpf_limpo in mapa_cpf:
+                        c = mapa_cpf[cpf_limpo]
+                        colabs_encontrados[c['id']] = {
+                            "id": c['id'],
+                            "nome": c['nome'],
+                            "cpf": c.get('cpf') or c.get('matricula') or '',
+                            "matricula": c.get('matricula') or c.get('cpf') or '',
+                            "cargo": c.get('cargo', ''),
+                            "categoria": c.get('categoria', 'MOD')
+                        }
+
+                # 3. Match por Nome Exato da Base
+                texto_upper = texto.upper()
+                for c in base_dicts:
+                    if c['id'] not in colabs_encontrados:
+                        if len(c['nome']) > 5 and c['nome'].upper() in texto_upper:
+                             colabs_encontrados[c['id']] = {
+                                "id": c['id'],
+                                "nome": c['nome'],
+                                "cpf": c.get('cpf') or c.get('matricula') or '',
+                                "matricula": c.get('matricula') or c.get('cpf') or '',
+                                "cargo": c.get('cargo', ''),
+                                "categoria": c.get('categoria', 'MOD')
+                            }
+
+                # 4. Injetar todos os MOI ativos
+                for moi in mois_ativos:
+                    if moi['id'] not in colabs_encontrados:
+                        colabs_encontrados[moi['id']] = {
+                            "id": moi['id'],
+                            "nome": moi['nome'],
+                            "cpf": moi.get('cpf') or moi.get('matricula') or '',
+                            "matricula": moi.get('matricula') or moi.get('cpf') or '',
+                            "cargo": moi.get('cargo', ''),
+                            "categoria": "MOI"
+                        }
+
+                lista_final = list(colabs_encontrados.values())
+                lista_final.sort(key=lambda x: x['nome'])
+
+                try:
+                    os.remove(str(filepath))
+                except Exception:
+                    pass
+
+                resultados.append({
+                    "arquivo": file.filename,
+                    "data": data_doc,
+                    "inicio": hr_inicio,
+                    "fim": hr_fim,
+                    "total": len(lista_final),
+                    "colaboradores": lista_final
+                })
+
+            except Exception as e:
+                erros.append({"arquivo": file.filename, "erro": str(e)})
+                try:
+                    os.remove(str(filepath))
+                except Exception:
+                    pass
+
+        if not resultados and erros:
+            return jsonify({"error": "Todos os arquivos falharam", "detalhes": erros}), 400
+
         total_colabs = sum(r["total"] for r in resultados)
         registrar_log(
             db, "success", "pte",
-            f"PTE processado: {len(resultados)} arquivo(s), {total_colabs} colaborador(es) MOD",
+            f"PTE processado: {len(resultados)} arquivo(s), {total_colabs} colaborador(es) MOD+MOI",
             f"Arquivos: {[r['arquivo'] for r in resultados]}"
         )
+
+        return jsonify({
+            "success": True,
+            "processados": len(resultados),
+            "resultados": resultados,
+            "erros": erros,
+        })
     finally:
         db.close()
 
-    return jsonify({
-        "success": True,
-        "processados": len(resultados),
-        "resultados": resultados,
-        "erros": erros,
-    })
+
+@api.route("/pte/confirmar", methods=["POST"])
+def confirmar_pte():
+    """
+    Recebe os resultados confirmados pelo usuário e salva no histórico (ProcessamentoRDO).
+    Calcula dinamicamente a data exata com tempo inicial e final.
+    """
+    data = request.get_json()
+    if not data or "resultados" not in data:
+        return jsonify({"error": "Dados inválidos."}), 400
+
+    resultados = data["resultados"]
+    
+    # Calcular data_execucao, start_min e end_max iterando sobre as chaves "DD/MM/YYYY|HH:MM|HH:MM"
+    from datetime import datetime
+    start_min = None
+    end_max = None
+    datas_encontradas = set()
+
+    total = 0
+    for key, colabs in resultados.items():
+        total += len(colabs)
+        partes = key.split('|')
+        data_str = partes[0] if len(partes) > 0 else 'Sem Data'
+        if data_str and data_str != 'Sem Data':
+            datas_encontradas.add(data_str)
+        
+        ini_str = partes[1] if len(partes) > 1 else ''
+        fim_str = partes[2] if len(partes) > 2 else ''
+        
+        if ini_str:
+            try:
+                dt_ini = datetime.strptime(f"{data_str} {ini_str.strip()}", "%d/%m/%Y %H:%M:%S")
+                if not start_min or dt_ini < start_min: start_min = dt_ini
+            except ValueError:
+                pass
+        if fim_str:
+            try:
+                dt_fim = datetime.strptime(f"{data_str} {fim_str.strip()}", "%d/%m/%Y %H:%M:%S")
+                if not end_max or dt_fim > end_max: end_max = dt_fim
+            except ValueError:
+                pass
+
+    ds = ", ".join(sorted(datas_encontradas)) if datas_encontradas else "Sem Data"
+    hi = start_min.strftime("%H:%M:%S") if start_min else "--:--"
+    hf = end_max.strftime("%H:%M:%S") if end_max else "--:--"
+    
+    titulo_arquivo = f"Multidata {ds}" if len(datas_encontradas) > 1 else f"Abertura PTE {ds}"
+    if hi != "--:--" or hf != "--:--":
+        titulo_arquivo += f" — Das {hi} às {hf}"
+
+    db = SessionLocal()
+    try:
+        proc = ProcessamentoRDO(
+            nome_arquivo=titulo_arquivo,
+            status="confirmado",
+            total_nomes_extraidos=total,
+            total_matches_auto=total,
+            total_matches_revisao=0,
+            total_sem_match=0,
+            resultado_json=json.dumps(resultados, ensure_ascii=False)
+        )
+        db.add(proc)
+        db.commit()
+        
+        registrar_log(db, "success", "pte", f"Confirmação de PTE: {total} colaboradores salvos no histórico.")
+        
+        return jsonify({"success": True})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
 
 
 # ─────────────────────────────────────────────

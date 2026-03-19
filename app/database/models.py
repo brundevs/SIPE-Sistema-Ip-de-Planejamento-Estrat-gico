@@ -1,5 +1,5 @@
 """
-RDO Pro Max 2.0 - Modelos do Banco de Dados (SQLAlchemy)
+SIPE | Sistema Ipê de Planejamento Estratégico - Modelos do Banco de Dados (SQLAlchemy)
 Tabelas: Colaboradores, Vinculos, ProcessamentoRDO, LogAtividade
 """
 from datetime import datetime, timezone
@@ -118,6 +118,7 @@ class ProcessamentoRDO(Base):
             "total_matches_revisao": self.total_matches_revisao,
             "total_sem_match": self.total_sem_match,
             "status": self.status,
+            "resultado_json": self.resultado_json
         }
 
 

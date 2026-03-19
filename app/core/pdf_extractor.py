@@ -1,5 +1,5 @@
 """
-RDO Pro Max 2.0 - Motor de Extração de PDF
+SIPE | Sistema Ipê de Planejamento Estratégico - Motor de Extração de PDF
 Extrai nomes, CPFs e dados de RDOs usando pdfplumber.
 """
 import re
@@ -204,6 +204,22 @@ def extrair_data_documento(texto: str) -> str:
                     continue
 
     return "Sem Data"
+
+
+def extrair_horarios_pte(texto: str) -> tuple[str, str]:
+    """Extrai 'Data/Hora efetiva inicio' e 'fim' do texto do documento PTE/Cesla."""
+    inicio = ""
+    fim = ""
+    # Data/Hora efetiva inicio\n18/03/2026 8:10:21
+    m_ini = re.search(r'Data/Hora efetiva in[ií]cio\s*([\d]{2}[/\-][\d]{2}[/\-][\d]{4}\s+[\d]{1,2}:[\d]{2}:[\d]{2})', texto, re.IGNORECASE)
+    if m_ini:
+        inicio = m_ini.group(1).strip()
+        
+    m_fim = re.search(r'Data/Hora efetiva fim\s*([\d]{2}[/\-][\d]{2}[/\-][\d]{4}\s+[\d]{1,2}:[\d]{2}:[\d]{2})', texto, re.IGNORECASE)
+    if m_fim:
+        fim = m_fim.group(1).strip()
+        
+    return inicio, fim
 
 
 def extrair_colaboradores_pte(texto: str) -> List[Dict[str, str]]:

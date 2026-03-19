@@ -1,5 +1,5 @@
 """
-RDO Pro Max 2.0 - Entry Point do Servidor Local
+SIPE | Sistema Ipê de Planejamento Estratégico - Entry Point do Servidor Local
 Inicializa Flask, registra rotas e inicia o servidor.
 """
 import sys
@@ -64,7 +64,7 @@ def create_app():
 if __name__ == "__main__":
     app = create_app()
     print("\n" + "=" * 60)
-    print("  [RDO]  RDO Pro Max 2.0  --  Sistema Iniciado!")
+    print("  [SIPE]  SIPE | Sistema Ipê de Planejamento Estratégico  --  Sistema Iniciado!")
     print("=" * 60)
     print(f"  [WEB]  Acesse: http://localhost:5000")
     print(f"  [DIR]  Dados: {DATA_DIR}")

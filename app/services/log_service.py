@@ -1,5 +1,5 @@
 """
-RDO Pro Max 2.0 - Serviço de Log
+SIPE | Sistema Ipê de Planejamento Estratégico - Serviço de Log
 Registra atividades do sistema no banco de dados.
 """
 from datetime import datetime, timezone

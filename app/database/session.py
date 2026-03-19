@@ -1,5 +1,5 @@
 """
-RDO Pro Max 2.0 - Gerenciador de Sessão do Banco de Dados
+SIPE | Sistema Ipê de Planejamento Estratégico - Gerenciador de Sessão do Banco de Dados
 """
 import sys
 from pathlib import Path

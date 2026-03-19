@@ -1,5 +1,5 @@
 """
-RDO Pro Max 2.0 - Configurações Globais
+SIPE | Sistema Ipê de Planejamento Estratégico - Configurações Globais
 """
 import os
 from pathlib import Path

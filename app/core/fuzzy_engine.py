@@ -1,5 +1,5 @@
 """
-RDO Pro Max 2.0 - Motor de Busca Fuzzy
+SIPE | Sistema Ipê de Planejamento Estratégico - Motor de Busca Fuzzy
 Lógica de comparação de strings com thefuzz para matching de nomes.
 """
 from typing import List, Dict, Optional, Tuple
