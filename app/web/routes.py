@@ -1457,37 +1457,92 @@ def rdo_obra_dados():
 
     db = SessionLocal()
     try:
-        # 1. Buscar ProcessamentoRDO confirmado da data
-        procs = db.query(ProcessamentoRDO).filter(
-            ProcessamentoRDO.status == "confirmado"
-        ).order_by(ProcessamentoRDO.data_processamento.desc()).all()
+        # 1. Registros PTe para a data (fonte principal)
+        registros_obra = db.query(PteObraRegistro).filter(
+            PteObraRegistro.data_referencia == data_iso
+        ).order_by(PteObraRegistro.criado_em.asc()).all()
 
-        proc_do_dia = None
-        colabs_do_dia = []
+        # Extrai HH:MM de qualquer formato ("DD/MM/YYYY HH:MM:SS", "HH:MM", "HH:MM:SS")
+        def _hhmm(s):
+            if not s or not s.strip():
+                return None
+            parts = s.strip().split(' ')
+            t = (parts[1] if len(parts) >= 2 else parts[0]).split(':')
+            if len(t) >= 2:
+                return f"{t[0].zfill(2)}:{t[1].zfill(2)}"
+            return None
+
+        def _mins(hhmm):
+            if not hhmm:
+                return None
+            try:
+                h, m = hhmm.split(':')
+                return int(h) * 60 + int(m)
+            except Exception:
+                return None
+
+        # Horários: menor hora_inicio e maior hora_fim entre os registros
         inicio_horario = None
         fim_horario = None
+        for reg in registros_obra:
+            ini = _hhmm(reg.hora_inicio)
+            fim = _hhmm(reg.hora_fim)
+            if ini is not None:
+                if inicio_horario is None or (_mins(ini) or 0) < (_mins(inicio_horario) or 9999):
+                    inicio_horario = ini
+            if fim is not None:
+                if fim_horario is None or (_mins(fim) or 0) > (_mins(fim_horario) or 0):
+                    fim_horario = fim
 
-        for proc in procs:
-            if not proc.resultado_json:
-                continue
-            try:
-                resultado = json.loads(proc.resultado_json)
-            except Exception:
-                continue
-            for key in resultado.keys():
-                if key.startswith(data_br):
-                    proc_do_dia = proc
-                    inicio_horario = proc.inicio_horario
-                    fim_horario = proc.fim_horario
-                    seen_cpfs = set()
-                    for colab in resultado[key]:
-                        cpf_k = colab.get('cpf') or colab.get('nome', '')
-                        if cpf_k not in seen_cpfs:
-                            seen_cpfs.add(cpf_k)
-                            colabs_do_dia.append(colab)
+        # Colaboradores: coletar de todos os processamentos vinculados (deduplicado)
+        colabs_do_dia = []
+        seen_uids: set = set()
+        proc_ids_vistos: set = set()
+        for reg in registros_obra:
+            if reg.processamento_id and reg.processamento_id not in proc_ids_vistos:
+                proc_ids_vistos.add(reg.processamento_id)
+                proc = db.query(ProcessamentoRDO).filter(
+                    ProcessamentoRDO.id == reg.processamento_id
+                ).first()
+                if proc and proc.resultado_json:
+                    try:
+                        resultado = json.loads(proc.resultado_json)
+                        for colabs in resultado.values():
+                            for c in colabs:
+                                uid = (c.get('cpf') or '') + '|' + (c.get('nome') or '')
+                                if uid not in seen_uids:
+                                    seen_uids.add(uid)
+                                    colabs_do_dia.append(c)
+                    except Exception:
+                        pass
+
+        # Fallback: se não há registros PTe para a data, tenta ProcessamentoRDO direto
+        if not registros_obra:
+            procs = db.query(ProcessamentoRDO).filter(
+                ProcessamentoRDO.status == "confirmado"
+            ).order_by(ProcessamentoRDO.data_processamento.desc()).all()
+            for proc in procs:
+                if not proc.resultado_json:
+                    continue
+                try:
+                    resultado = json.loads(proc.resultado_json)
+                except Exception:
+                    continue
+                for key in resultado.keys():
+                    if key.startswith(data_br):
+                        if not inicio_horario:
+                            inicio_horario = proc.inicio_horario
+                        if not fim_horario:
+                            fim_horario = proc.fim_horario
+                        proc_ids_vistos.add(proc.id)
+                        for colab in resultado[key]:
+                            uid = (colab.get('cpf') or '') + '|' + (colab.get('nome') or '')
+                            if uid not in seen_uids:
+                                seen_uids.add(uid)
+                                colabs_do_dia.append(colab)
+                        break
+                if colabs_do_dia:
                     break
-            if proc_do_dia:
-                break
 
         # 2. Atividades do cronograma para a data
         atividades = []
@@ -1500,27 +1555,31 @@ def rdo_obra_dados():
             ).order_by(Tarefa.ordem).all()
             atividades = [t.to_dict() for t in tarefas]
 
-        # 3. Permissões de Trabalho da data
+        # 3. Permissões de Trabalho (de todos os processamentos da data)
         permissoes = []
-        if proc_do_dia:
+        if proc_ids_vistos:
             pts = db.query(PermissaoTrabalho).filter(
-                PermissaoTrabalho.processamento_id == proc_do_dia.id
+                PermissaoTrabalho.processamento_id.in_(list(proc_ids_vistos))
             ).all()
             permissoes = [pt.to_dict() for pt in pts]
-        # Também busca por data_documento
         if not permissoes:
             pts_by_date = db.query(PermissaoTrabalho).filter(
                 PermissaoTrabalho.data_documento == data_iso
             ).all()
             permissoes = [pt.to_dict() for pt in pts_by_date]
 
-        # 4. Clima para a data
+        # 4. Liberações de veículos do dia
+        liberacoes = db.query(HistoricoLiberacao).filter(
+            HistoricoLiberacao.data_acesso == data_iso
+        ).order_by(HistoricoLiberacao.data_geracao.asc()).all()
+
+        # 5. Clima para a data
         clima = _obter_clima_data_especifica(data_iso)
 
         return jsonify({
             "data": data_iso,
             "data_br": data_br,
-            "processamento_id": proc_do_dia.id if proc_do_dia else None,
+            "registros_obra": [r.to_dict() for r in registros_obra],
             "horarios": {
                 "inicio_atividade": inicio_horario or "",
                 "fim_atividade": fim_horario or "",
@@ -1531,6 +1590,17 @@ def rdo_obra_dados():
             "efetivo": colabs_do_dia,
             "atividades": atividades,
             "permissoes": permissoes,
+            "liberacoes_veiculos": [
+                {
+                    "motorista": l.motorista,
+                    "placa": l.placa or "",
+                    "empresa": l.empresa or "",
+                    "periodo": l.periodo or "",
+                    "motivo": l.motivo or "",
+                    "local": l.local or "",
+                }
+                for l in liberacoes
+            ],
         })
     finally:
         db.close()
@@ -2542,30 +2612,108 @@ def deletar_terceiro(tid):
 
 @api.route("/pte-obra/registros", methods=["GET"])
 def pte_obra_listar():
-    """Lista todos os registros PTe Obra."""
+    """Lista todos os registros PTe Obra com lista resumida de colaboradores para busca."""
     db = SessionLocal()
     try:
         regs = db.query(PteObraRegistro).order_by(PteObraRegistro.criado_em.desc()).all()
-        return jsonify({"registros": [r.to_dict() for r in regs]})
+
+        # Carrega colaboradores de todos os processamentos em lote (evita N+1)
+        proc_ids = list({r.processamento_id for r in regs if r.processamento_id})
+        proc_map = {}
+        if proc_ids:
+            procs = db.query(ProcessamentoRDO).filter(
+                ProcessamentoRDO.id.in_(proc_ids)
+            ).all()
+            for p in procs:
+                try:
+                    resultado = json.loads(p.resultado_json or '{}')
+                    seen: set = set()
+                    colabs = []
+                    for lst in resultado.values():
+                        for c in lst:
+                            uid = (c.get('cpf') or '') + '|' + (c.get('nome') or '')
+                            if uid not in seen:
+                                seen.add(uid)
+                                colabs.append({'nome': c.get('nome', ''), 'cpf': c.get('cpf', ''), 'categoria': c.get('categoria', 'MOD')})
+                    colabs.sort(key=lambda x: x['nome'])
+                    proc_map[p.id] = colabs
+                except Exception:
+                    proc_map[p.id] = []
+
+        result = []
+        for r in regs:
+            d = r.to_dict()
+            d['colaboradores'] = proc_map.get(r.processamento_id, [])
+            result.append(d)
+
+        return jsonify({"registros": result})
+    finally:
+        db.close()
+
+
+@api.route("/pte-obra/registros/manual", methods=["POST"])
+def pte_obra_criar_manual():
+    """Cria um registro PTe manual para uma data (sem processamento vinculado)."""
+    data = request.get_json() or {}
+    data_ref = data.get("data_referencia", "").strip()
+    if not data_ref:
+        return jsonify({"error": "data_referencia obrigatória"}), 400
+    db = SessionLocal()
+    try:
+        reg = PteObraRegistro(
+            data_referencia=data_ref,
+            hora_inicio=data.get("hora_inicio") or None,
+            hora_fim=data.get("hora_fim") or None,
+            relacao_atividades=data.get("relacao_atividades") or None,
+            descricao_completa=data.get("descricao_completa") or None,
+        )
+        db.add(reg)
+        db.commit()
+        return jsonify({"success": True, "registro": reg.to_dict()})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
     finally:
         db.close()
 
 
 @api.route("/pte-obra/registros/<int:rid>", methods=["PATCH"])
 def pte_obra_editar(rid):
-    """Edita hora_inicio e/ou hora_fim de um registro PTe Obra."""
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "Dados inválidos"}), 400
+    """Edita campos editáveis de um registro PTe Obra."""
+    data = request.get_json() or {}
     db = SessionLocal()
     try:
         reg = db.query(PteObraRegistro).filter(PteObraRegistro.id == rid).first()
         if not reg:
             return jsonify({"error": "Não encontrado"}), 404
+
+        # Campos de texto direto
+        for campo in ("data_referencia", "relacao_atividades", "descricao_completa"):
+            if campo in data:
+                setattr(reg, campo, data[campo] or None)
+
+        # hora_inicio: salva HH:MM e sincroniza ProcessamentoRDO.inicio_horario
         if "hora_inicio" in data:
-            reg.hora_inicio = data["hora_inicio"]
+            val = data["hora_inicio"]
+            reg.hora_inicio = val
+            if reg.processamento_id:
+                proc = db.query(ProcessamentoRDO).filter(
+                    ProcessamentoRDO.id == reg.processamento_id
+                ).first()
+                if proc:
+                    proc.inicio_horario = val
+
+        # hora_fim: salva HH:MM e sincroniza ProcessamentoRDO.fim_horario
         if "hora_fim" in data:
-            reg.hora_fim = data["hora_fim"]
+            val = data["hora_fim"]
+            reg.hora_fim = val
+            if reg.processamento_id:
+                proc = db.query(ProcessamentoRDO).filter(
+                    ProcessamentoRDO.id == reg.processamento_id
+                ).first()
+                if proc:
+                    proc.fim_horario = val
+
         db.commit()
         return jsonify({"success": True, "registro": reg.to_dict()})
     except Exception as e:

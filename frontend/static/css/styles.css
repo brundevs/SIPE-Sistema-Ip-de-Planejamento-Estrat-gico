@@ -1056,6 +1056,11 @@ a:hover { color: var(--primary-300); }
   transition: transform var(--transition-base);
 }
 
+.modal.modal-xl {
+  max-width: min(95vw, 1100px);
+  width: min(95vw, 1100px);
+}
+
 .modal-backdrop.active .modal {
   transform: scale(1);
 }

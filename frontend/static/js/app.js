@@ -106,9 +106,11 @@ function hideLoading() {
 }
 
 // ── Modal ──────────────────────────────────────
-function showModal(title, bodyHtml) {
+function showModal(title, bodyHtml, opts = {}) {
   document.getElementById('modalTitle').textContent = title;
   document.getElementById('modalBody').innerHTML = bodyHtml;
+  const modalEl = document.querySelector('#modalBackdrop .modal');
+  modalEl.classList.toggle('modal-xl', opts.size === 'xl');
   document.getElementById('modalBackdrop').classList.add('active');
 }
 
@@ -634,29 +636,19 @@ async function handlePteUpload(input) {
       
       let totCols = 0;
       if (respData.resultados) {
+        // Data e horários NÃO são extraídos do PDF — usuário preenche manualmente.
+        // Todos os PDFs da sessão são agrupados em um único grupo (chave "||").
+        const KEY = '||';
+        if (!pteAcumulado[KEY]) pteAcumulado[KEY] = [];
+
         for (const res of respData.resultados) {
-          const dataDoc = res.data || 'Sem Data';
-          const newInicio = res.inicio || '';
-          const newFim    = res.fim    || '';
-
-          // Mesclar com chave do mesmo dia (pegar início mais cedo e fim mais tarde)
-          const existingKey = Object.keys(pteAcumulado).find(k => k.split('|')[0] === dataDoc);
-          let key;
-          if (existingKey) {
-            const [, existInicio, existFim] = existingKey.split('|');
-            const toMins = s => { if (!s) return null; const p = s.trim().split(' '); if (p.length < 2) return null; const t = p[1].split(':'); return +t[0]*60 + +t[1]; };
-            const mergedInicio = (toMins(newInicio) !== null && (toMins(existInicio) === null || toMins(newInicio) < toMins(existInicio))) ? newInicio : existInicio;
-            const mergedFim    = (toMins(newFim)    !== null && (toMins(existFim)    === null || toMins(newFim)    > toMins(existFim)))    ? newFim    : existFim;
-            key = `${dataDoc}|${mergedInicio}|${mergedFim}`;
-            if (key !== existingKey) { pteAcumulado[key] = pteAcumulado[existingKey]; delete pteAcumulado[existingKey]; }
-          } else {
-            key = `${dataDoc}|${newInicio}|${newFim}`;
-            pteAcumulado[key] = [];
-          }
-
+          const normNome = n => (n || '').toLowerCase().trim().replace(/\s+/g, ' ');
           for (const colab of (res.colaboradores || [])) {
-            const exists = pteAcumulado[key].some(c => c.nome === colab.nome && c.cpf === colab.cpf);
-            if (!exists) { pteAcumulado[key].push(colab); totCols++; }
+            const exists = pteAcumulado[KEY].some(c => {
+              if (colab.cpf && c.cpf) return c.cpf === colab.cpf;
+              return normNome(c.nome) === normNome(colab.nome);
+            });
+            if (!exists) { pteAcumulado[KEY].push(colab); totCols++; }
           }
 
           if (res.pdf_filename) ptePdfFilenames.push(res.pdf_filename);
@@ -667,17 +659,17 @@ async function handlePteUpload(input) {
             if (!jaExiste) ptePermissoesAcumulado.push(pt);
           }
 
-          // Coletar dados PTe Obra (id_atividade, id_pte, descricao)
+          // Coletar dados PTe Obra
           if (res.pte_obra) {
             pteObraAcumulado.push({ arquivo: res.arquivo || file.name, ...res.pte_obra });
           }
         }
       }
 
-      statusEl.textContent = `✓ ${totCols} MOD extraídos`;
+      statusEl.textContent = `✓ ${totCols} colaboradores extraídos`;
       statusEl.className = 'badge badge-success';
 
-      // Ordenar por nome dentro de cada data
+      // Ordenar por nome
       Object.keys(pteAcumulado).forEach(dt => {
         pteAcumulado[dt].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
       });
@@ -710,23 +702,54 @@ function renderPteResults() {
 
   const totalColabs = datas.reduce((acc, dt) => acc + pteAcumulado[dt].length, 0);
   document.getElementById('pteResultsSubtitle').textContent =
-    `${totalColabs} colaboradores MOD/MOI em ${datas.length} documento(s)`;
+    `${totalColabs} colaboradores extraídos — preencha a data e os horários manualmente`;
 
   container.innerHTML = datas.map(dt => {
     const colabs = pteAcumulado[dt];
     const [dataParte, inicioParte, fimParte] = dt.split('|');
-    const headerTimes = (inicioParte && fimParte) ? `<span style="font-size:12px; color:var(--text-secondary); margin-left:12px;">⏰ ${inicioParte} até ${fimParte}</span>` : '';
+
+    const dateInputVal = (() => {
+      if (!dataParte || dataParte === 'Sem Data') return '';
+      const p = dataParte.split('/');
+      return p.length === 3 ? `${p[2]}-${p[1]}-${p[0]}` : '';
+    })();
+    const _hhmm = s => {
+      if (!s || !s.trim()) return '';
+      const p = s.trim().split(' ');
+      const t = (p.length >= 2 ? p[1] : p[0]).split(':');
+      return t.length >= 2 ? t[0].padStart(2, '0') + ':' + t[1] : '';
+    };
+    const inicioHHMM = _hhmm(inicioParte);
+    const fimHHMM    = _hhmm(fimParte);
+    const dtEsc      = escapeHtml(dt);
 
     return `
-      <div style="margin-bottom:20px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding:0 4px;">
-          <div style="display:flex;align-items:center;gap:8px;">
+      <div data-key="${dtEsc}" style="margin-bottom:20px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding:0 4px;flex-wrap:wrap;gap:8px;">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
             <span style="font-size:16px;">📅</span>
-            <span style="font-weight:700;font-size:14px;">${escapeHtml(dataParte)}</span>
-            ${headerTimes}
-            <span class="badge badge-info" style="margin-left:8px;">${colabs.length} pessoas</span>
+            <input type="date" value="${dateInputVal}"
+              style="font-size:13px;font-weight:700;background:transparent;border:1px dashed var(--border-subtle);border-radius:4px;padding:2px 6px;cursor:pointer;color:var(--text-primary);"
+              onfocus="this.style.borderColor='var(--primary-400)'"
+              onblur="this.style.borderColor='var(--border-subtle)';if(this.value)atualizarChavePte(this.closest('[data-key]').dataset.key,'data',this.value)"
+              title="Clique para editar a data">
+            <span style="font-size:11px;color:var(--text-muted);margin-left:4px;">Início:</span>
+            <input type="text" inputmode="numeric" placeholder="HH:MM" value="${inicioHHMM}"
+              style="font-size:12px;background:transparent;border:1px dashed var(--border-subtle);border-radius:4px;padding:2px 6px;color:var(--text-secondary);width:58px;text-align:center;"
+              onfocus="this.style.borderColor='var(--primary-400)'"
+              onblur="this.style.borderColor='var(--border-subtle)';atualizarHoraPte(this,'inicio')"
+              onkeydown="if(event.key==='Enter')this.blur()"
+              title="Hora de início (HH:MM)">
+            <span style="font-size:11px;color:var(--text-muted);">Fim:</span>
+            <input type="text" inputmode="numeric" placeholder="HH:MM" value="${fimHHMM}"
+              style="font-size:12px;background:transparent;border:1px dashed var(--border-subtle);border-radius:4px;padding:2px 6px;color:var(--text-secondary);width:58px;text-align:center;"
+              onfocus="this.style.borderColor='var(--primary-400)'"
+              onblur="this.style.borderColor='var(--border-subtle)';atualizarHoraPte(this,'fim')"
+              onkeydown="if(event.key==='Enter')this.blur()"
+              title="Hora de fim (HH:MM)">
+            <span class="badge badge-info" style="margin-left:4px;">${colabs.length} pessoas</span>
           </div>
-          <button class="btn btn-ghost btn-sm" onclick="copiarCpfsPorData('${escapeHtml(dt)}')" title="Copiar CPFs desta data">
+          <button class="btn btn-ghost btn-sm" onclick="copiarCpfsPorData(this.closest('[data-key]').dataset.key)" title="Copiar CPFs desta data">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             Copiar CPFs
           </button>
@@ -748,11 +771,11 @@ function renderPteResults() {
                 <tr>
                   <td style="color:var(--text-muted);font-size:12px;">${i + 1}</td>
                   <td style="font-weight:600;">${escapeHtml(c.nome)}</td>
-                  <td><span style="font-family:'JetBrains Mono',monospace;font-size:12px;">${escapeHtml(c.cpf || '—')}</span></td>
+                  <td><span style="font-family:'JetBrains Mono',monospace;font-size:12px;">${escapeHtml(formatCpf(c.cpf) || '—')}</span></td>
                   <td style="font-size:13px;">${escapeHtml(c.cargo || '—')}</td>
                   <td><span class="badge badge-${c.categoria === 'MOI' ? 'blue' : 'success'}">${escapeHtml(c.categoria || 'MOD')}</span></td>
                   <td>
-                    <button class="btn btn-ghost btn-sm" onclick="removerColabPte('${escapeHtml(dt)}', ${i})" title="Remover dessa lista">
+                    <button class="btn btn-ghost btn-sm" onclick="removerColabPte('${dtEsc}', ${i})" title="Remover dessa lista">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
                     </button>
                   </td>
@@ -809,21 +832,77 @@ async function confirmarProcessamentoPte() {
 
 function copiarCpfsPorData(dt) {
   const colabs = pteAcumulado[dt] || [];
-  const cpfs = colabs.map(c => c.cpf).filter(Boolean);
+  const cpfs = [...new Set(colabs.map(c => c.cpf).filter(Boolean))].map(formatCpf);
   if (!cpfs.length) { showToast('Nenhum CPF disponível para esta data.', 'warning'); return; }
   navigator.clipboard.writeText(cpfs.join('\n'))
-    .then(() => showToast(`${cpfs.length} CPFs copiados (${dt})!`, 'success'))
+    .then(() => showToast(`${cpfs.length} CPFs copiados!`, 'success'))
     .catch(() => showToast('Erro ao copiar', 'error'));
 }
 
 function copiarTodosCpfs() {
   const datas = Object.keys(pteAcumulado).sort();
   const todosColabs = datas.flatMap(dt => pteAcumulado[dt]);
-  const cpfs = todosColabs.map(c => c.cpf).filter(Boolean);
+  const cpfs = [...new Set(todosColabs.map(c => c.cpf).filter(Boolean))].map(formatCpf);
   if (!cpfs.length) { showToast('Nenhum CPF disponível.', 'warning'); return; }
   navigator.clipboard.writeText(cpfs.join('\n'))
     .then(() => showToast(`${cpfs.length} CPFs copiados!`, 'success'))
     .catch(() => showToast('Erro ao copiar', 'error'));
+}
+
+function atualizarHoraPte(el, campo) {
+  const raw = el.value.trim();
+  if (!raw) return;
+  // Aceita "0700", "07:00", "7:0" etc. e normaliza para HH:MM
+  const digits = raw.replace(/\D/g, '');
+  let hhmm = raw;
+  if (digits.length >= 3 && !raw.includes(':')) {
+    // "0700" → "07:00"
+    hhmm = digits.slice(0, 2) + ':' + digits.slice(2, 4).padEnd(2, '0');
+  } else if (digits.length === 1 || digits.length === 2) {
+    hhmm = digits.padStart(2, '0') + ':00';
+  }
+  // Valida formato HH:MM
+  const match = hhmm.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) { showToast('Formato inválido. Use HH:MM (ex: 07:30)', 'warning'); el.value = ''; return; }
+  const h = parseInt(match[1]), m = parseInt(match[2]);
+  if (h > 23 || m > 59) { showToast('Hora inválida', 'warning'); el.value = ''; return; }
+  hhmm = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+  el.value = hhmm;
+  const key = el.closest('[data-key]')?.dataset?.key;
+  if (key) atualizarChavePte(key, campo, hhmm);
+}
+
+function atualizarChavePte(oldKey, campo, valor) {
+  if (!pteAcumulado[oldKey] || !valor) return;
+  const [dataParte, inicioParte, fimParte] = oldKey.split('|');
+  let novaData   = dataParte   || '';
+  let novoInicio = inicioParte || '';
+  let novoFim    = fimParte    || '';
+
+  if (campo === 'data') {
+    // valor vem no formato YYYY-MM-DD do input[type=date]
+    const [y, m, d] = valor.split('-');
+    novaData = `${d}/${m}/${y}`;
+    // Atualiza a data dentro dos datetimes de início/fim se eles tiverem data embutida
+    if (novoInicio && novoInicio.includes(' ')) {
+      novoInicio = `${novaData} ${novoInicio.split(' ')[1]}`;
+    }
+    if (novoFim && novoFim.includes(' ')) {
+      novoFim = `${novaData} ${novoFim.split(' ')[1]}`;
+    }
+  } else if (campo === 'inicio') {
+    // valor vem no formato HH:MM do input[type=time]
+    novoInicio = novaData ? `${novaData} ${valor}:00` : valor;
+  } else if (campo === 'fim') {
+    novoFim = novaData ? `${novaData} ${valor}:00` : valor;
+  }
+
+  const newKey = `${novaData}|${novoInicio}|${novoFim}`;
+  if (newKey !== oldKey) {
+    pteAcumulado[newKey] = pteAcumulado[oldKey];
+    delete pteAcumulado[oldKey];
+  }
+  renderPteResults();
 }
 
 function limparResultadosPTE() {
@@ -3271,11 +3350,19 @@ const plan = (() => {
     if (!container) return;
 
     const termo = (filtro || document.getElementById('pteObraBusca')?.value || '').toLowerCase().trim();
+    // Normaliza CPF digitado (remove pontos/traços para comparar com CPF cru)
+    const termoCpfNorm = termo.replace(/\D/g, '');
+
+    const _matchColab = c =>
+      (c.nome || '').toLowerCase().includes(termo) ||
+      (termoCpfNorm.length >= 3 && (c.cpf || '').replace(/\D/g, '').includes(termoCpfNorm));
+
     const regs = termo
       ? _pteObraRegs.filter(r => {
           const arqs = (() => { try { return JSON.parse(r.arquivos_processados||'[]'); } catch(e){ return []; } })();
           const txt = [r.id_pte, r.id_atividade, r.relacao_atividades, r.descricao_completa, r.hora_inicio, r.hora_fim, r.data_referencia, ...arqs].join(' ').toLowerCase();
-          return txt.includes(termo);
+          if (txt.includes(termo)) return true;
+          return (r.colaboradores || []).some(_matchColab);
         })
       : _pteObraRegs;
 
@@ -3284,34 +3371,63 @@ const plan = (() => {
       return;
     }
 
-    const _cell = (rid, campo, val, multiline) => {
-      const tag = multiline ? 'div' : 'span';
-      const style = multiline
-        ? `display:block;width:100%;min-height:36px;padding:3px 6px;border-radius:4px;border:1px solid transparent;font-size:.81rem;cursor:text;white-space:pre-wrap;line-height:1.4;`
-        : `display:inline-block;min-width:130px;padding:3px 6px;border-radius:4px;border:1px solid transparent;font-size:.82rem;cursor:text;`;
-      return `<${tag}
-        contenteditable="true"
-        style="${style}"
-        onfocus="this.style.borderColor='var(--primary-400)';this.style.background='var(--bg-primary)'"
-        onblur="plan.pteObraSalvarCelula(this,${rid},'${campo}')"
-        onkeydown="${multiline ? '' : `if(event.key==='Enter'){event.preventDefault();this.blur()}`}"
-        >${escapeHtml(val||'')}</${tag}>`;
+    // Extrai HH:MM de qualquer formato ("DD/MM/YYYY HH:MM:SS", "HH:MM", "HH:MM:SS")
+    const _toHHMM = s => {
+      if (!s) return '';
+      const p = s.trim().split(' ');
+      const t = (p.length >= 2 ? p[1] : p[0]).split(':');
+      return t.length >= 2 ? t[0].padStart(2, '0') + ':' + t[1] : '';
     };
 
+    const _inputCell = (rid, campo, val, type) => `<input
+        type="${type}"
+        value="${escapeHtml(type === 'time' ? _toHHMM(val) : (val || ''))}"
+        style="background:transparent;border:1px dashed var(--border-subtle);border-radius:4px;padding:3px 6px;font-size:.82rem;width:100%;min-width:${type === 'date' ? '130px' : '90px'};box-sizing:border-box;cursor:pointer;"
+        onfocus="this.style.borderColor='var(--primary-400)';this.style.background='var(--bg-primary)'"
+        onblur="this.style.borderColor='var(--border-subtle)';this.style.background='transparent'"
+        onchange="plan.pteObraSalvarInput(this,${rid},'${campo}')"
+      >`;
+
+    const _cell = (rid, campo, val) => `<div
+        contenteditable="true"
+        style="display:block;width:100%;min-height:36px;padding:3px 6px;border-radius:4px;border:1px solid transparent;font-size:.81rem;cursor:text;white-space:pre-wrap;line-height:1.4;"
+        onfocus="this.style.borderColor='var(--primary-400)';this.style.background='var(--bg-primary)'"
+        onblur="plan.pteObraSalvarCelula(this,${rid},'${campo}')"
+        >${escapeHtml(val || '')}</div>`;
+
     const rows = regs.map(r => {
-      const arqs = (() => { try { return JSON.parse(r.arquivos_processados||'[]'); } catch(e){ return []; } })();
-      const arqStr = arqs.join('\n');
-      const dataLabel = r.data_referencia ? r.data_referencia.split('-').reverse().join('/') : '';
+      const arqs = (() => { try { return JSON.parse(r.arquivos_processados || '[]'); } catch(e) { return []; } })();
+      const arqNomes = arqs.map(fn => {
+        const m = fn.match(/^\d+_(.+)$/);
+        return m ? m[1] : fn;
+      });
+
+      // Colaboradores que batem com o termo de busca
+      const matchedColabs = termo ? (r.colaboradores || []).filter(_matchColab) : [];
+      const matchBlock = matchedColabs.length ? `
+        <div style="margin-top:8px;padding:6px 10px;background:var(--bg-primary);border-radius:6px;border-left:3px solid var(--primary-400);">
+          <div style="font-size:.72rem;font-weight:700;color:var(--primary-400);margin-bottom:4px;">
+            👤 ${matchedColabs.length} colaborador${matchedColabs.length > 1 ? 'es' : ''} encontrado${matchedColabs.length > 1 ? 's' : ''}
+          </div>
+          ${matchedColabs.map(c => `
+            <div style="font-size:.78rem;display:flex;align-items:center;gap:8px;padding:2px 0;">
+              <span style="font-weight:600;">${escapeHtml(c.nome || '')}</span>
+              <span style="font-family:'JetBrains Mono',monospace;color:var(--text-muted);font-size:.72rem;">${escapeHtml(formatCpf(c.cpf) || '')}</span>
+              <span class="badge badge-${c.categoria === 'MOI' ? 'blue' : 'success'}" style="font-size:.65rem;">${escapeHtml(c.categoria || 'MOD')}</span>
+            </div>`).join('')}
+        </div>` : '';
+
       return `<tr style="border-bottom:1px solid var(--border-subtle); vertical-align:top;">
-        <td style="padding:8px 10px;min-width:160px;">
-          ${_cell(r.id,'arquivos_processados_str',arqStr,true)}
-          <span style="font-size:.74rem;color:var(--text-muted);display:block;margin-top:2px;">${escapeHtml(dataLabel)}</span>
+        <td style="padding:8px 10px;min-width:150px;">
+          ${_inputCell(r.id, 'data_referencia', r.data_referencia || '', 'date')}
+          ${arqNomes.length ? `<div style="font-size:.72rem;color:var(--text-muted);margin-top:4px;line-height:1.5;">${arqNomes.map(n => escapeHtml(n)).join('<br>')}</div>` : ''}
         </td>
-        <td style="padding:8px 10px;min-width:150px;">${_cell(r.id,'hora_inicio',r.hora_inicio,false)}</td>
-        <td style="padding:8px 10px;min-width:150px;">${_cell(r.id,'hora_fim',r.hora_fim,false)}</td>
+        <td style="padding:8px 10px;min-width:110px;">${_inputCell(r.id, 'hora_inicio', r.hora_inicio || '', 'time')}</td>
+        <td style="padding:8px 10px;min-width:110px;">${_inputCell(r.id, 'hora_fim', r.hora_fim || '', 'time')}</td>
         <td style="padding:8px 10px;min-width:220px;">
-          ${_cell(r.id,'relacao_atividades',r.relacao_atividades,false)}
-          ${_cell(r.id,'descricao_completa',r.descricao_completa,true)}
+          ${_cell(r.id, 'relacao_atividades', r.relacao_atividades)}
+          ${_cell(r.id, 'descricao_completa', r.descricao_completa)}
+          ${matchBlock}
         </td>
         <td style="padding:8px 10px;white-space:nowrap;text-align:right;">
           <button class="btn btn-secondary btn-sm" style="font-size:.75rem;margin-bottom:4px;display:block;width:100%;" onclick="plan.pteObraVerDetalhes(${r.id})">Ver Colaboradores</button>
@@ -3325,27 +3441,39 @@ const plan = (() => {
       : '';
 
     container.innerHTML = `
-      <div style="padding:12px 10px 8px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;gap:8px;">
-        <div class="search-wrapper" style="flex:1;max-width:380px;">
+      <div style="padding:12px 10px 8px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <div class="search-wrapper" style="flex:1;min-width:200px;max-width:380px;">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input id="pteObraBusca" class="input" type="text" placeholder="Buscar por arquivo, CPF, descrição..." value="${escapeHtml(termo)}"
+          <input id="pteObraBusca" class="input" type="text" placeholder="Buscar por nome, CPF, arquivo, descrição..." value="${escapeHtml(termo)}"
             oninput="plan._pteObraRenderTabela()"
             style="padding-left:28px;font-size:.83rem;">
         </div>
         <span style="font-size:.8rem;color:var(--text-muted);">${regs.length} de ${_pteObraRegs.length} registros</span>
+        <button class="btn btn-primary btn-sm" onclick="plan.pteObraAdicionarManual()" style="margin-left:auto;font-size:.8rem;">
+          + Novo Registro
+        </button>
       </div>
       <div style="overflow-x:auto;">
         <table style="width:100%;border-collapse:collapse;">
           <thead><tr style="border-bottom:2px solid var(--border);background:var(--bg-secondary);">
-            <th style="padding:8px 10px;text-align:left;font-size:.79rem;color:var(--text-muted);">Arquivo / Data ✎</th>
-            <th style="padding:8px 10px;text-align:left;font-size:.79rem;color:var(--text-muted);">Início ✎</th>
-            <th style="padding:8px 10px;text-align:left;font-size:.79rem;color:var(--text-muted);">Fim ✎</th>
+            <th style="padding:8px 10px;text-align:left;font-size:.79rem;color:var(--text-muted);">Data ✎</th>
+            <th style="padding:8px 10px;text-align:left;font-size:.79rem;color:var(--text-muted);">Hora de Início ✎</th>
+            <th style="padding:8px 10px;text-align:left;font-size:.79rem;color:var(--text-muted);">Hora de Fim ✎</th>
             <th style="padding:8px 10px;text-align:left;font-size:.79rem;color:var(--text-muted);">Registro / Descrição ✎</th>
             <th style="padding:8px 10px;"></th>
           </tr></thead>
           <tbody>${rows}${emptyMsg}</tbody>
         </table>
       </div>`;
+
+    // Restaura foco no input de busca após re-render (evita perder foco ao digitar)
+    if (termo) {
+      const busca = document.getElementById('pteObraBusca');
+      if (busca) {
+        busca.focus();
+        busca.setSelectionRange(busca.value.length, busca.value.length);
+      }
+    }
   }
 
   async function pteObraSalvarCelula(el, rid, campo) {
@@ -3364,6 +3492,74 @@ const plan = (() => {
     }
   }
 
+  async function pteObraSalvarInput(el, rid, campo) {
+    const val = el.value || '';
+    try {
+      await apiCall(`/api/pte-obra/registros/${rid}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [campo]: val })
+      });
+      showToast('Salvo', 'success', 1200);
+    } catch(err) {
+      showToast('Erro ao salvar: ' + err.message, 'error');
+    }
+  }
+
+  function pteObraAdicionarManual() {
+    const hoje = new Date().toISOString().slice(0, 10);
+    showModal('Adicionar Registro Manual', `
+      <div style="display:flex;flex-direction:column;gap:16px;min-width:320px;">
+        <div>
+          <label class="field-label">Data do Registro *</label>
+          <input id="_pteManualData" class="input" type="date" value="${hoje}" style="width:100%;">
+        </div>
+        <div>
+          <label class="field-label">PT / Relação de Atividades</label>
+          <input id="_pteManualPt" class="input" type="text" placeholder="PT - 190026 - Atividade..." style="width:100%;">
+        </div>
+        <div>
+          <label class="field-label">Hora de Início</label>
+          <input id="_pteManualInicio" class="input" type="time" style="width:100%;">
+        </div>
+        <div>
+          <label class="field-label">Hora de Fim</label>
+          <input id="_pteManualFim" class="input" type="time" style="width:100%;">
+        </div>
+        <div style="display:flex;gap:10px;margin-top:4px;">
+          <button class="btn btn-primary" onclick="plan._pteObraSalvarManual()">Criar Registro</button>
+          <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+        </div>
+      </div>`);
+  }
+
+  async function _pteObraSalvarManual() {
+    const dataRef   = document.getElementById('_pteManualData')?.value || '';
+    const relacao   = document.getElementById('_pteManualPt')?.value?.trim() || '';
+    const hInicio   = document.getElementById('_pteManualInicio')?.value || '';
+    const hFim      = document.getElementById('_pteManualFim')?.value || '';
+    if (!dataRef) { showToast('Selecione a data', 'warning'); return; }
+    closeModal();
+    try {
+      const res = await apiCall('/api/pte-obra/registros/manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          data_referencia: dataRef,
+          relacao_atividades: relacao || null,
+          hora_inicio: hInicio || null,
+          hora_fim: hFim || null,
+        })
+      });
+      if (res.success) {
+        showToast('Registro criado. Preencha a descrição na tabela.', 'success');
+        pteObraCarregarRegistros();
+      }
+    } catch(e) {
+      showToast('Erro: ' + e.message, 'error');
+    }
+  }
+
   async function pteObraVerDetalhes(rid) {
     let det;
     try {
@@ -3378,8 +3574,8 @@ const plan = (() => {
 
     const modColabs = colabs.filter(c => c.categoria !== 'MOI');
     const moiColabs = colabs.filter(c => c.categoria === 'MOI');
-    const cpfsMod   = modColabs.map(c => c.cpf).filter(Boolean);
-    const cpfsMoi   = moiColabs.map(c => c.cpf).filter(Boolean);
+    const cpfsMod   = [...new Set(modColabs.map(c => c.cpf).filter(Boolean))].map(formatCpf);
+    const cpfsMoi   = [...new Set(moiColabs.map(c => c.cpf).filter(Boolean))].map(formatCpf);
 
     window._pteDetCopiarMod = () => {
       if (!cpfsMod.length) { showToast('Nenhum CPF MOD disponível', 'warning'); return; }
@@ -3400,7 +3596,7 @@ const plan = (() => {
         <tr>
           <td style="color:var(--text-muted);font-size:12px;">${i + 1}</td>
           <td style="font-weight:600;">${escapeHtml(c.nome || '')}</td>
-          <td><span style="font-family:'JetBrains Mono',monospace;font-size:12px;">${escapeHtml(c.cpf || '—')}</span></td>
+          <td><span style="font-family:'JetBrains Mono',monospace;font-size:12px;">${escapeHtml(formatCpf(c.cpf) || '—')}</span></td>
           <td style="font-size:13px;">${escapeHtml(c.cargo || '—')}</td>
           <td><span class="badge badge-${c.categoria === 'MOI' ? 'blue' : 'success'}">${escapeHtml(c.categoria || 'MOD')}</span></td>
         </tr>`).join('');
@@ -3435,7 +3631,7 @@ const plan = (() => {
       </a>`).join('<br>') : '';
 
     showModal('Detalhes PTe — Colaboradores e PDFs', `
-      <div style="width:min(92vw,860px);display:flex;flex-direction:column;gap:16px;">
+      <div style="display:flex;flex-direction:column;gap:16px;">
 
         ${pdfs.length ? `
         <div>
@@ -3447,7 +3643,7 @@ const plan = (() => {
         ${_grupo('MOI — Mão de Obra Indireta', moiColabs, 'cpf', '_pteDetCopiarMoi')}
 
         ${!colabs.length ? `<div style="text-align:center;padding:24px;color:var(--text-muted);">Nenhum colaborador registrado neste PTe.</div>` : ''}
-      </div>`);
+      </div>`, { size: 'xl' });
   }
 
   async function pteObraDeletar(id) {
@@ -3465,7 +3661,10 @@ const plan = (() => {
            salvarProgresso, salvarCampo, adicionarTarefa, recalcular, salvarEditor, deletarProjeto,
            relatorio, relatorioExecutivo, calculadoraHoras, setCurvaSType,
            carregarCurvaSTable: _carregarCurvaSTable, carregarRelatorioExecutivoInline,
-           pteObraCarregarRegistros, pteObraSalvarCelula, pteObraVerDetalhes, pteObraDeletar };
+           pteObraCarregarRegistros, _pteObraRenderTabela,
+           pteObraSalvarCelula, pteObraSalvarInput,
+           pteObraAdicionarManual, _pteObraSalvarManual,
+           pteObraVerDetalhes, pteObraDeletar };
 })();
 
 
@@ -3701,12 +3900,8 @@ const rdoObra = (() => {
   let _ptsExtras = []; // PTs adicionadas manualmente pelo usuário
 
   async function init() {
-    // Set today's date by default
     const inp = document.getElementById('rdoDataInput');
-    if (inp && !inp.value) {
-      inp.value = new Date().toISOString().slice(0, 10);
-    }
-    // Load projects
+    if (inp && !inp.value) inp.value = new Date().toISOString().slice(0, 10);
     try {
       const d = await apiCall('/api/projetos');
       const sel = document.getElementById('rdoProjetoSelect');
@@ -3740,7 +3935,6 @@ const rdoObra = (() => {
   }
 
   function _renderDados(d) {
-    // Show body
     document.getElementById('rdoObraBody').style.display = '';
     document.getElementById('rdoObraEmpty').style.display = 'none';
 
@@ -3755,7 +3949,7 @@ const rdoObra = (() => {
     // Clima
     const setClima = (id, val) => {
       const sel = document.getElementById(id); if (!sel) return;
-      ['Bom','Nublado','Chuvoso'].forEach((v,i) => sel.options[i].selected = (v === val));
+      for (const opt of sel.options) opt.selected = (opt.value === val);
     };
     if (d.clima) {
       setClima('rdoClimaManha', d.clima.manha || 'Bom');
@@ -3775,13 +3969,16 @@ const rdoObra = (() => {
       if (!efetivo.length) {
         efetivoTable.innerHTML = '<div class="empty-state" style="padding:24px;"><div class="empty-state-icon">👷</div><div class="empty-state-title">Nenhum efetivo encontrado no Histórico PTe para esta data</div></div>';
       } else {
-        const rows = efetivo.map((c,i) => `<tr>
+        const modCount = efetivo.filter(c => c.categoria !== 'MOI').length;
+        const moiCount = efetivo.filter(c => c.categoria === 'MOI').length;
+        const rows = efetivo.map((c, i) => `<tr>
           <td style="color:var(--text-muted);font-size:12px;">${i+1}</td>
           <td style="font-weight:600;">${escapeHtml(c.nome||'')}</td>
-          <td style="font-family:'JetBrains Mono';font-size:12px;">${escapeHtml(c.cpf||'—')}</td>
+          <td style="font-family:'JetBrains Mono';font-size:12px;">${escapeHtml(formatCpf(c.cpf)||'—')}</td>
           <td style="font-size:12px;">${escapeHtml(c.cargo||'—')}</td>
           <td><span class="badge badge-${c.categoria==='MOI'?'blue':'success'}">${escapeHtml(c.categoria||'MOD')}</span></td>
         </tr>`).join('');
+        if (efetivoCount) efetivoCount.textContent = `${efetivo.length} colaboradores — ${modCount} MOD · ${moiCount} MOI`;
         efetivoTable.innerHTML = `<div class="table-wrapper"><table class="table">
           <thead><tr><th>#</th><th>Nome</th><th>CPF</th><th>Cargo</th><th>Cat.</th></tr></thead>
           <tbody>${rows}</tbody>
@@ -3794,58 +3991,122 @@ const rdoObra = (() => {
     if (atividadesContainer) {
       const atividades = (d.atividades || []).filter(t => (t.nivel||0) >= 1);
       if (!atividades.length) {
-        atividadesContainer.innerHTML = '<div style="color:var(--text-muted); font-size:13px; padding:8px 0;">Nenhuma atividade do cronograma programada para esta data. Use o campo abaixo para registrar atividades.</div>';
+        atividadesContainer.innerHTML = '<div style="color:var(--text-muted); font-size:13px; padding:8px 0;">Nenhuma atividade do cronograma programada para esta data.</div>';
       } else {
         atividadesContainer.innerHTML = atividades.map((t, i) => {
           const titulo = `${t.codigo ? t.codigo + ' — ' : ''}${t.nome}${t.responsavel ? ' (' + t.responsavel + ')' : ''}`;
           return `<div style="background:var(--bg-primary); border:1px solid var(--border-subtle); border-radius:8px; padding:12px;">
             <div style="font-weight:700; font-size:13px; color:var(--text-primary); margin-bottom:6px;">${escapeHtml(titulo)}</div>
-            <textarea class="input" id="rdoAtivDesc_${i}" rows="2" placeholder="Descreva o que foi executado nesta atividade..." style="width:100%; resize:vertical; font-size:13px; line-height:1.5;"></textarea>
+            <textarea class="input" id="rdoAtivDesc_${i}" rows="2" placeholder="Descreva o que foi executado..." style="width:100%; resize:vertical; font-size:13px; line-height:1.5;"></textarea>
           </div>`;
         }).join('');
-        // Store activities reference
-        atividadesContainer.dataset.count = atividades.length;
         atividadesContainer._atividades = atividades;
       }
     }
 
-    // Permissões de Trabalho
-    _renderPermissoes(d.permissoes || []);
+    // Registros PTe
+    _renderRegistrosObra(d.registros_obra || []);
+
+    // Liberações de veículos
+    _renderVeiculos(d.liberacoes_veiculos || []);
   }
 
-  function _renderPermissoes(permissoes) {
-    const container = document.getElementById('rdoPermissoesContainer');
+  function _renderRegistrosObra(registros) {
+    const container = document.getElementById('rdoRegistrosObra');
     if (!container) return;
-    const todas = [...permissoes, ..._ptsExtras];
-    if (!todas.length) {
-      container.innerHTML = '<div class="empty-state" style="padding:24px;"><div class="empty-state-icon">🛡️</div><div class="empty-state-title">Nenhuma PT extraída para esta data</div></div>';
+    // Combina registros do servidor + registros manuais adicionados nessa sessão
+    const todos = [...registros, ...(_dadosAtivos?._registrosExtras || [])];
+    if (!todos.length) {
+      container.innerHTML = '<div class="empty-state" style="padding:24px;"><div class="empty-state-icon">📋</div><div class="empty-state-title">Nenhum registro PTe para esta data</div><div class="empty-state-desc">Clique em "+ Adicionar Registro" para adicionar manualmente.</div></div>';
       return;
     }
-    container.innerHTML = todas.map((pt, i) => `
-      <div style="display:flex; gap:12px; align-items:flex-start; padding:10px 12px; background:var(--bg-primary); border:1px solid var(--border-subtle); border-radius:8px; margin-bottom:8px;">
-        <div style="flex-shrink:0; background:var(--primary-100,#dbeafe); color:var(--primary-700); font-weight:700; font-size:12px; padding:4px 8px; border-radius:6px; font-family:'JetBrains Mono',monospace;">
-          PT ${escapeHtml(pt.numero_pt || '?')}
+    container.innerHTML = todos.map((r, i) => {
+      const ptLabel = r.relacao_atividades ? escapeHtml(r.relacao_atividades) : '—';
+      const horarios = (r.hora_inicio || r.hora_fim)
+        ? `<span style="font-size:.75rem;color:var(--text-muted);margin-left:8px;">⏰ ${escapeHtml(r.hora_inicio||'')} – ${escapeHtml(r.hora_fim||'')}</span>`
+        : '';
+      return `<div style="background:var(--bg-primary);border:1px solid var(--border-subtle);border-radius:8px;padding:14px;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span style="background:var(--primary-100,#dbeafe);color:var(--primary-700);font-weight:700;font-size:11px;padding:3px 8px;border-radius:5px;font-family:'JetBrains Mono',monospace;">${ptLabel}</span>
+            ${horarios}
+          </div>
+          ${r.id ? `<button class="btn btn-ghost btn-sm" style="font-size:.72rem;color:var(--text-muted);" onclick="rdoObra.removerRegistro(${r.id},${i})">✕ Remover</button>` : `<button class="btn btn-ghost btn-sm" style="font-size:.72rem;color:var(--text-muted);" onclick="rdoObra.removerRegistroExtra(${i})">✕</button>`}
         </div>
-        <div style="flex:1; font-size:13px; color:var(--text-secondary); line-height:1.5;">${escapeHtml(pt.descricao || '')}</div>
-      </div>
-    `).join('');
+        <textarea class="input" id="rdoRegDesc_${i}" rows="3" placeholder="Descrição do que foi executado nesta PT..." style="width:100%;resize:vertical;font-size:13px;line-height:1.5;">${escapeHtml(r.descricao_completa||'')}</textarea>
+      </div>`;
+    }).join('');
   }
 
-  function adicionarPtManual() {
-    const num = document.getElementById('rdoPtNumeroManual')?.value.trim() || '';
-    const desc = document.getElementById('rdoPtDescManual')?.value.trim() || '';
-    if (!num && !desc) { showToast('Preencha o número ou a descrição da PT.', 'warning'); return; }
-    _ptsExtras.push({ numero_pt: num, descricao: desc });
-    const pts = _dadosAtivos?.permissoes || [];
-    _renderPermissoes(pts);
-    const n = document.getElementById('rdoPtNumeroManual'); if(n) n.value = '';
-    const d2 = document.getElementById('rdoPtDescManual'); if(d2) d2.value = '';
-    showToast('PT adicionada.', 'success');
+  function _renderVeiculos(liberacoes) {
+    const container = document.getElementById('rdoVeiculosContainer');
+    if (!container) return;
+    if (!liberacoes.length) {
+      container.innerHTML = '<div class="empty-state" style="padding:24px;"><div class="empty-state-icon">🚗</div><div class="empty-state-title">Nenhuma liberação de veículo registrada para esta data</div></div>';
+      return;
+    }
+    container.innerHTML = liberacoes.map(l => `
+      <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 12px;background:var(--bg-primary);border:1px solid var(--border-subtle);border-radius:8px;margin-bottom:8px;">
+        <div style="flex-shrink:0;">
+          <div style="font-weight:700;font-size:13px;">${escapeHtml(l.motorista||'—')}</div>
+          ${l.placa ? `<div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-muted);margin-top:2px;">${escapeHtml(l.placa)}</div>` : ''}
+        </div>
+        <div style="flex:1;font-size:12px;color:var(--text-secondary);line-height:1.6;">
+          ${l.empresa ? `<span style="margin-right:10px;">🏢 ${escapeHtml(l.empresa)}</span>` : ''}
+          ${l.periodo ? `<span style="margin-right:10px;">🕐 ${escapeHtml(l.periodo)}</span>` : ''}
+          ${l.local ? `<span style="margin-right:10px;">📍 ${escapeHtml(l.local)}</span>` : ''}
+          ${l.motivo ? `<div style="margin-top:4px;color:var(--text-muted);">${escapeHtml(l.motivo)}</div>` : ''}
+        </div>
+      </div>`).join('');
+  }
+
+  async function adicionarRegistroManual() {
+    if (!_dadosAtivos) { showToast('Busque os dados do RDO primeiro.', 'warning'); return; }
+    const data = _dadosAtivos.data;
+    showLoading('Criando registro...');
+    try {
+      const res = await apiCall('/api/pte-obra/registros/manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data_referencia: data })
+      });
+      hideLoading();
+      if (res.success) {
+        // Atualiza a lista de registros e re-renderiza
+        _dadosAtivos.registros_obra = [...(_dadosAtivos.registros_obra || []), res.registro];
+        _renderRegistrosObra(_dadosAtivos.registros_obra);
+        // Recarrega também o histórico PTe se estiver visível
+        if (typeof plan !== 'undefined') plan.pteObraCarregarRegistros();
+        showToast('Registro adicionado. Preencha a PT e a descrição.', 'success');
+      }
+    } catch(e) {
+      hideLoading();
+      showToast('Erro ao adicionar registro: ' + e.message, 'error');
+    }
+  }
+
+  async function removerRegistro(rid, idx) {
+    if (!confirm('Remover este registro PTe?')) return;
+    try {
+      await apiCall(`/api/pte-obra/registros/${rid}`, { method: 'DELETE' });
+      _dadosAtivos.registros_obra = (_dadosAtivos.registros_obra || []).filter(r => r.id !== rid);
+      _renderRegistrosObra(_dadosAtivos.registros_obra);
+      if (typeof plan !== 'undefined') plan.pteObraCarregarRegistros();
+    } catch(e) {
+      showToast('Erro: ' + e.message, 'error');
+    }
+  }
+
+  function removerRegistroExtra(idx) {
+    if (!_dadosAtivos) return;
+    if (!_dadosAtivos._registrosExtras) return;
+    _dadosAtivos._registrosExtras.splice(idx, 1);
+    _renderRegistrosObra(_dadosAtivos.registros_obra || []);
   }
 
   function copiarCPFs() {
     const efetivo = _dadosAtivos?.efetivo || [];
-    const cpfs = efetivo.map(c => c.cpf).filter(Boolean);
+    const cpfs = [...new Set(efetivo.map(c => c.cpf).filter(Boolean))].map(formatCpf);
     if (!cpfs.length) { showToast('Nenhum CPF disponível para esta data.', 'warning'); return; }
     navigator.clipboard.writeText(cpfs.join('\n'))
       .then(() => showToast(`${cpfs.length} CPFs copiados!`, 'success'))
@@ -3859,15 +4120,15 @@ const rdoObra = (() => {
     const dataBr = d.data_br || '';
     const getV = id => document.getElementById(id)?.value || '';
 
-    const inicioAtiv = getV('rdoInicioAtividade');
-    const fimAtiv = getV('rdoFimAtividade');
-    const inicioInt = getV('rdoInicioIntervalo');
-    const fimInt = getV('rdoFimIntervalo');
-    const climaManha = getV('rdoClimaManha');
-    const climaTarde = getV('rdoClimaTarde');
-    const climaNoite = getV('rdoClimaNoite');
+    const inicioAtiv  = getV('rdoInicioAtividade');
+    const fimAtiv     = getV('rdoFimAtividade');
+    const inicioInt   = getV('rdoInicioIntervalo');
+    const fimInt      = getV('rdoFimIntervalo');
+    const climaManha  = getV('rdoClimaManha');
+    const climaTarde  = getV('rdoClimaTarde');
+    const climaNoite  = getV('rdoClimaNoite');
     const precipitacao = getV('rdoPrecipitacao');
-    const outrasAtiv = getV('rdoOutrasAtividades');
+    const outrasAtiv  = getV('rdoOutrasAtividades');
 
     let texto = `RELATÓRIO DIÁRIO DE OBRA (RDO)\nData: ${dataBr}\n\n`;
 
@@ -3878,44 +4139,71 @@ const rdoObra = (() => {
     texto += `Fim de Intervalo: ${fimInt || '—'}\n\n`;
 
     texto += `CLIMA\n`;
-    texto += `Manhã: ${climaManha}\n`;
-    texto += `Tarde: ${climaTarde}\n`;
-    texto += `Noite: ${climaNoite}\n`;
+    texto += `Manhã: ${climaManha}\nTarde: ${climaTarde}\nNoite: ${climaNoite}\n`;
     texto += `Precipitação (mm): ${precipitacao || '0'}\n\n`;
 
     texto += `EFETIVO\n`;
     const efetivo = d.efetivo || [];
-    if (efetivo.length) {
-      efetivo.forEach((c, i) => {
-        texto += `${i+1}. ${c.nome} — CPF: ${c.cpf || '—'} — ${c.cargo || ''} [${c.categoria || 'MOD'}]\n`;
-      });
-    } else {
-      texto += 'Sem efetivo registrado para esta data.\n';
+    const modList = efetivo.filter(c => c.categoria !== 'MOI');
+    const moiList = efetivo.filter(c => c.categoria === 'MOI');
+    texto += `Total: ${efetivo.length} colaboradores (${modList.length} MOD · ${moiList.length} MOI)\n`;
+    if (modList.length) {
+      texto += `MOD:\n`;
+      modList.forEach((c, i) => { texto += `  ${i+1}. ${c.nome} — CPF: ${formatCpf(c.cpf) || '—'} — ${c.cargo || ''}\n`; });
+    }
+    if (moiList.length) {
+      texto += `MOI:\n`;
+      moiList.forEach((c, i) => { texto += `  ${i+1}. ${c.nome} — CPF: ${formatCpf(c.cpf) || '—'} — ${c.cargo || ''}\n`; });
     }
     texto += '\n';
 
     // Atividades do cronograma
-    const atividadesContainer = document.getElementById('rdoAtividadesContainer');
     const atividades = (d.atividades || []).filter(t => (t.nivel||0) >= 1);
-    texto += `1 - Serviços Executados\n`;
-    if (atividades.length) {
+    if (atividades.length || outrasAtiv) {
+      texto += `ATIVIDADES (CRONOGRAMA)\n`;
       atividades.forEach((t, i) => {
         const titulo = `${t.codigo || ''} ${t.nome}`.trim();
         const desc = document.getElementById(`rdoAtivDesc_${i}`)?.value?.trim() || '';
-        texto += `${titulo}\n`;
+        texto += `${titulo}`;
+        if (desc) texto += `\n${desc}`;
+        texto += '\n';
+      });
+      if (outrasAtiv) texto += `\nOutras Atividades:\n${outrasAtiv}\n`;
+      texto += '\n';
+    }
+
+    // Registros PTe (PT + Descrição)
+    const registros = d.registros_obra || [];
+    const todos = [...registros, ...(d._registrosExtras || [])];
+    if (todos.length) {
+      texto += `REGISTROS PTe\n`;
+      todos.forEach((r, i) => {
+        if (r.relacao_atividades) texto += `${r.relacao_atividades}\n`;
+        const desc = document.getElementById(`rdoRegDesc_${i}`)?.value?.trim() || r.descricao_completa || '';
         if (desc) texto += `${desc}\n`;
         texto += '\n';
       });
     }
 
-    if (outrasAtiv) {
-      texto += `2 - Outras Atividades\n${outrasAtiv}\n\n`;
+    // Liberações de veículos
+    const liberacoes = d.liberacoes_veiculos || [];
+    if (liberacoes.length) {
+      texto += `LIBERAÇÕES DE VEÍCULOS\n`;
+      liberacoes.forEach(l => {
+        texto += `${l.motorista}`;
+        if (l.placa) texto += ` — Placa: ${l.placa}`;
+        if (l.empresa) texto += ` — ${l.empresa}`;
+        if (l.periodo) texto += ` — ${l.periodo}`;
+        if (l.motivo) texto += `\n  ${l.motivo}`;
+        texto += '\n';
+      });
+      texto += '\n';
     }
 
-    // Permissões de Trabalho
+    // PTs extras manuais
     const todasPts = [...(d.permissoes || []), ..._ptsExtras];
     if (todasPts.length) {
-      texto += `3 - PERMISSÕES DE TRABALHO\n`;
+      texto += `PERMISSÕES DE TRABALHO ADICIONAIS\n`;
       todasPts.forEach(pt => {
         texto += `PT ${pt.numero_pt || '?'}`;
         if (pt.descricao) texto += ` - ${pt.descricao}`;
@@ -3952,5 +4240,5 @@ const rdoObra = (() => {
     showToast('RDO limpo.', 'info');
   }
 
-  return { init, buscarDados, copiarCPFs, adicionarPtManual, gerarTexto, copiarTexto, limpar };
+  return { init, buscarDados, copiarCPFs, adicionarRegistroManual, removerRegistro, removerRegistroExtra, gerarTexto, copiarTexto, limpar };
 })();
