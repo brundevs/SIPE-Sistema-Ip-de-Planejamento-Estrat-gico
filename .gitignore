@@ -14,8 +14,14 @@ venv/
 env/
 .env
 
-# Uploads temporários
+# Dados gerados em runtime (não versionados)
 data/uploads/
+data/pdfs/
+data/storage.db
+data/*.json
+
+# Ambiente local
+# (já está o .env acima)
 
 # IDE
 .vscode/

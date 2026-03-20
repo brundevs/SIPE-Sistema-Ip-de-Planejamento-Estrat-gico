@@ -1,54 +1,64 @@
 # SIPE | Sistema Ipê de Planejamento Estratégico
 
-SIPE é uma plataforma web moderna de gestão empresarial focada em **Planejamento, Efetivo, Clima, Inventário e Saúde Ocupacional**. Concebida com foco em automação, processamento inteligente de PDF e gestão modular em tempo real.
+Plataforma web de gestão empresarial para obras e serviços industriais — controle de efetivo, processamento inteligente de documentos PTe/Cesla, planejamento de obras com Curva S e integração climática em tempo real.
 
-## 🚀 Principais Features
+## Principais Funcionalidades
 
-- **Dashboard Executivo:** Visão em tempo real do número de colaboradores ativos, processamentos de RDO/PTE recentes e visão meteorológica atrelada ao local da obra.
-- **Gestão de Efetivo (MOD/MOI):** Importação em lotes de planilhas de Excel (`.xlsx`) com toda a base de Mão de Obra Direta e Mão de Obra Indireta. Autocomplete para adição rápida.
-- **Leitura IA de PTE/Cesla:** Motor de processamento via PDF capaz de extrair dinamicamente a força de trabalho que executou os serviços, ler Data/Hora Efetiva exata e realizar auditoria "Fuzzy" (probabilística) de reconhecimento de nomes incorretos extraídos dos PDFs e compará-los milimetricamente com a verdadeira Base de Colaboradores.
-- **Histórico Consolidado:** Agrupamento multi-datas da presença dos funcionários com a possibilidade de varrer logs em um modal rico com horários de início e fim.
-- **Módulos Independentes (Em expansão):** Arquitetura pronta para acoplar módulos de RH (Administração de Pessoal), Segurança do Trabalho, e Almoxarifado.
+- **Dashboard Executivo** — KPIs em tempo real, logs e efetivo do último PTe
+- **Gestão de Efetivo (MOD/MOI)** — Importação via Excel com detecção flexível de colunas, deduplicação automática e exportação formatada
+- **Leitura Inteligente de PTe/Cesla** — Motor de extração multi-estratégia (CPF, matrícula, fuzzy matching) que identifica colaboradores presentes e injeta MOI automaticamente
+- **Histórico Consolidado** — Busca de pessoa em todos os registros com horários de presença
+- **Liberação de Acessos** — Autocomplete unificado e geração de texto padronizado para portaria
+- **Clima em Tempo Real** — Previsão 10 dias via Open-Meteo, por turno, com cache automático
+- **Planejamento de Obras** — Importação de MS Project (CSV/XLSX/XML), Gantt, Curva S, Histograma de Recursos
+- **RDO Diário** — Relatório automático combinando efetivo, clima e cronograma
 
-## 🛠️ Tecnologias Utilizadas
+## Stack Tecnológico
 
-- **Backend:** Python + Flask
-- **Banco de Dados:** SQLite (via SQLAlchemy ORM)
-- **Extração de Texto:** PyMuPDF (`fitz`) e Regex
-- **Reconhecimento Probabilístico:** `TheFuzz` (Fuzzy Wuzzy)
-- **Frontend:** Vanilla HTML/JS/CSS com design Glassmorphism e alta fluidez no DOM.
-- **Integração Externa:** OpenWeatherMap API
+| Camada | Tecnologias |
+|--------|-------------|
+| **Backend** | Python 3.9+ · Flask 3.1 · SQLAlchemy 2.0 · SQLite |
+| **PDF** | pdfplumber 0.11 · regex multi-estratégia |
+| **Matching** | TheFuzz (token_sort_ratio) com threshold configurável |
+| **Excel** | openpyxl 3.1 (leitura + geração formatada) |
+| **Clima** | Open-Meteo API (sem chave) + cache JSON 30min |
+| **Frontend** | Vanilla JS/HTML/CSS · Chart.js 4.4 · Glassmorphism |
 
-## ⚙️ Como Instalar e Rodar
+## Instalação
 
-1. Clone o repositório:
 ```bash
-git clone https://github.com/brundevs/Sipe---Sistema-Ip-Planejamento-Estrategico.git
-cd Sipe---Sistema-Ip-Planejamento-Estrategico
-```
-
-2. Instale as dependências:
-```bash
+# 1. Instalar dependências
 pip install -r requirements.txt
-```
 
-3. Inicie o servidor:
-```bash
+# 2. Configurar ambiente (opcional)
+copy .env.example .env
+# Edite .env se necessário
+
+# 3. Iniciar servidor
 python main.py
+
+# Acesse: http://localhost:5000
 ```
 
-4. Acesse via navegador:
+## Estrutura do Projeto
+
 ```
-http://localhost:5000
+app/core/         → Motores de PDF e fuzzy matching
+app/database/     → Modelos ORM e migrações automáticas
+app/services/     → Clima e logs
+app/web/routes.py → 50+ endpoints REST
+frontend/         → SPA (HTML + JS + CSS)
+data/             → SQLite, PDFs e cache
 ```
 
-## 📂 Estrutura de Diretórios
-- `app/core/`: Motores de Inteligência e Lógica. Contém `fuzzy_engine.py` e `pdf_extractor.py`.
-- `app/database/`: Modelos e sessão relacional.
-- `app/web/`: Camada HTTP e Rotas REST da aplicação.
-- `app/services/`: Serviços agnósticos e utilitários (ex: Clima, Logs).
-- `frontend/`: UI SPA, folhas de estilo e iconografia em SVG SVG-First.
-- `main.py`: Entrypoint e Setup do Container.
+## Documentação Técnica
 
-## 📄 Licença
+Consulte **[TECH_STACK.md](TECH_STACK.md)** para documentação completa:
+- Descrição detalhada de todos os módulos
+- Referência completa da API REST
+- Schema do banco de dados
+- Guia para adicionar novas funcionalidades
+
+## Licença
+
 Sistema Proprietário. Desenvolvido para gestão privada e estratégica.

@@ -5,7 +5,7 @@ Extrai nomes, CPFs e dados de RDOs usando pdfplumber.
 import re
 import pdfplumber
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 
 def extrair_texto_pdf(caminho_pdf: str) -> str:
@@ -206,19 +206,37 @@ def extrair_data_documento(texto: str) -> str:
     return "Sem Data"
 
 
-def extrair_horarios_pte(texto: str) -> tuple[str, str]:
-    """Extrai 'Data/Hora efetiva inicio' e 'fim' do texto do documento PTE/Cesla."""
+def extrair_horarios_pte(texto: str) -> Tuple[str, str]:
+    """Extrai 'Data/Hora efetiva inicio' e 'fim' do texto do documento PTE/Cesla.
+
+    Formato esperado (data na linha seguinte ao label):
+        Data/Hora efetiva inicio
+        19/03/2026 8:11:34
+        Data/Hora efetiva fim
+        19/03/2026 16:35:27
+    """
     inicio = ""
     fim = ""
-    # Data/Hora efetiva inicio\n18/03/2026 8:10:21
-    m_ini = re.search(r'Data/Hora efetiva in[ií]cio[\s\S]{0,40}?(\d{1,2}[/\-]\d{1,2}[/\-]\d{4}\s+\d{1,2}:\d{2}:\d{2})', texto, re.IGNORECASE)
+    _dt_pat = r'(\d{1,2}[/\-]\d{1,2}[/\-]\d{4}\s+\d{1,2}:\d{2}:\d{2})'
+
+    # Tenta match direto: label + newline(s) + datetime
+    m_ini = re.search(r'Data/Hora efetiva in[ií]cio\s*\n\s*' + _dt_pat, texto, re.IGNORECASE)
     if m_ini:
         inicio = m_ini.group(1).strip()
+    else:
+        # fallback: label com qualquer whitespace antes da data
+        m_ini = re.search(r'Data/Hora efetiva in[ií]cio[\s\S]{0,60}?' + _dt_pat, texto, re.IGNORECASE)
+        if m_ini:
+            inicio = m_ini.group(1).strip()
 
-    m_fim = re.search(r'Data/Hora efetiva fim[\s\S]{0,40}?(\d{1,2}[/\-]\d{1,2}[/\-]\d{4}\s+\d{1,2}:\d{2}:\d{2})', texto, re.IGNORECASE)
+    m_fim = re.search(r'Data/Hora efetiva fim\s*\n\s*' + _dt_pat, texto, re.IGNORECASE)
     if m_fim:
         fim = m_fim.group(1).strip()
-        
+    else:
+        m_fim = re.search(r'Data/Hora efetiva fim[\s\S]{0,60}?' + _dt_pat, texto, re.IGNORECASE)
+        if m_fim:
+            fim = m_fim.group(1).strip()
+
     return inicio, fim
 
 
@@ -435,3 +453,72 @@ def extrair_permissoes_trabalho(texto: str) -> List[Dict[str, str]]:
         resultado.append({"numero_pt": "", "descricao": descricoes[0]})
 
     return resultado
+
+
+def extrair_dados_pte_obra(texto: str) -> Dict:
+    """
+    Extrai campos específicos de um PDF de Permissão de Trabalho (PTe) Nestlé
+    para o módulo Planejamento de Obras > Histórico PTe.
+
+    Retorna dict com:
+      - id_atividade  : str
+      - id_pte        : str
+      - hora_inicio   : str  (DD/MM/YYYY HH:MM:SS)
+      - hora_fim      : str  (DD/MM/YYYY HH:MM:SS)
+      - descricao     : str  (entre "Descrição detalhada da atividade" e "ID- Modelo das PTe's")
+    """
+    result = {
+        "id_atividade": "",
+        "id_pte": "",
+        "hora_inicio": "",
+        "hora_fim": "",
+        "descricao": "",
+    }
+
+    # ── ID da Atividade ──────────────────────────────────────────────────────
+    # Aparece após label "ID da Atividade" (com ou sem ":")
+    m = re.search(r'ID\s+da\s+Atividade\s*[:\-]?\s*([A-Z0-9\-]+)', texto, re.IGNORECASE)
+    if m:
+        result["id_atividade"] = m.group(1).strip()
+
+    # ── ID da PTe ────────────────────────────────────────────────────────────
+    # Aparece no bloco "ID da APR  ID da PTe\n<val1>  <val2>"
+    m_block = re.search(
+        r'ID\s+da\s+APR\s+ID\s+da\s+PTe[\s\S]{0,80}?(\d{5,})',
+        texto, re.IGNORECASE
+    )
+    if m_block:
+        result["id_pte"] = m_block.group(1).strip()
+    else:
+        # fallback: procura "ID da PTe" seguido de valor
+        m2 = re.search(r'ID\s+da\s+PTe\s*[:\-]?\s*([A-Z0-9\-]+)', texto, re.IGNORECASE)
+        if m2:
+            result["id_pte"] = m2.group(1).strip()
+
+    # ── Data/Hora efetiva início ──────────────────────────────────────────────
+    _dt_pat = r'(\d{1,2}[/\-]\d{1,2}[/\-]\d{4}\s+\d{1,2}:\d{2}:\d{2})'
+    m_ini = re.search(r'Data/Hora efetiva in[ií]cio\s*\n\s*' + _dt_pat, texto, re.IGNORECASE)
+    if not m_ini:
+        m_ini = re.search(r'Data/Hora efetiva in[ií]cio[\s\S]{0,60}?' + _dt_pat, texto, re.IGNORECASE)
+    if m_ini:
+        result["hora_inicio"] = m_ini.group(1).strip()
+
+    # ── Data/Hora efetiva fim ────────────────────────────────────────────────
+    m_fim = re.search(r'Data/Hora efetiva fim\s*\n\s*' + _dt_pat, texto, re.IGNORECASE)
+    if not m_fim:
+        m_fim = re.search(r'Data/Hora efetiva fim[\s\S]{0,60}?' + _dt_pat, texto, re.IGNORECASE)
+    if m_fim:
+        result["hora_fim"] = m_fim.group(1).strip()
+
+    # ── Descrição Detalhada ──────────────────────────────────────────────────
+    m_desc = re.search(
+        r'Descri[çc][aã]o\s+detalhada\s+da\s+atividade\s*([\s\S]+?)(?:ID[-\s]*Modelo\s+das\s+PTe|$)',
+        texto, re.IGNORECASE
+    )
+    if m_desc:
+        desc_raw = m_desc.group(1).strip()
+        # Remove linhas que parecem cabeçalho/rodapé (muito curtas ou só números)
+        linhas = [l.strip() for l in desc_raw.splitlines() if len(l.strip()) > 3]
+        result["descricao"] = " ".join(linhas[:10])  # limita a 10 linhas
+
+    return result

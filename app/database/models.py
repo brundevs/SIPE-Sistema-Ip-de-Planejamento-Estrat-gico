@@ -274,6 +274,38 @@ class PermissaoTrabalho(Base):
         }
 
 
+class PteObraRegistro(Base):
+    """Registro de PTe processado para Planejamento de Obras."""
+    __tablename__ = "pte_obra_registros"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    processamento_id = Column(Integer, ForeignKey("processamentos_rdo.id"), nullable=True)
+    id_pte = Column(String(100), nullable=True)          # ID da PTe extraído do PDF
+    id_atividade = Column(String(100), nullable=True)    # ID da Atividade extraído do PDF
+    data_referencia = Column(String(10), nullable=True)  # YYYY-MM-DD
+    hora_inicio = Column(String(25), nullable=True)      # datetime string mais cedo
+    hora_fim = Column(String(25), nullable=True)         # datetime string mais tarde
+    relacao_atividades = Column(Text, nullable=True)     # "PT - [ID] - [Descricao]"
+    descricao_completa = Column(Text, nullable=True)     # Descrição detalhada da atividade
+    arquivos_processados = Column(Text, nullable=True)   # JSON lista de nomes de arquivo
+    criado_em = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "processamento_id": self.processamento_id,
+            "id_pte": self.id_pte,
+            "id_atividade": self.id_atividade,
+            "data_referencia": self.data_referencia,
+            "hora_inicio": self.hora_inicio,
+            "hora_fim": self.hora_fim,
+            "relacao_atividades": self.relacao_atividades,
+            "descricao_completa": self.descricao_completa,
+            "arquivos_processados": self.arquivos_processados,
+            "criado_em": self.criado_em.isoformat() if self.criado_em else None,
+        }
+
+
 class LogAtividade(Base):
     """Log de atividades do sistema."""
     __tablename__ = "log_atividades"

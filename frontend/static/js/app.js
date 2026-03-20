@@ -225,10 +225,11 @@ async function loadColaboradores(busca = '') {
             <tr>
               <th>Nome</th>
               <th>CPF</th>
+              <th>Matrícula</th>
               <th>Cargo</th>
               <th>Setor</th>
+              <th>Empresa</th>
               <th>Categoria</th>
-              <th>Importado em</th>
               <th></th>
             </tr>
           </thead>
@@ -236,22 +237,22 @@ async function loadColaboradores(busca = '') {
             ${data.colaboradores.map(c => `
               <tr>
                 <td style="font-weight: 600;">${escapeHtml(c.nome)}</td>
-                <td><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px;">${escapeHtml(c.cpf || '—')}</span></td>
+                <td><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px;">${escapeHtml(c.cpf ? formatCpf(c.cpf) : '—')}</span></td>
+                <td style="font-family: 'JetBrains Mono', monospace; font-size: 12px;">${escapeHtml(c.matricula || '—')}</td>
                 <td>${escapeHtml(c.cargo || '—')}</td>
                 <td>${escapeHtml(c.setor || '—')}</td>
+                <td>${escapeHtml(c.empresa || '—')}</td>
                 <td>
-                  <button class="badge badge-${c.categoria === 'MOI' ? 'blue' : 'success'}" 
+                  <button class="badge badge-${c.categoria === 'MOI' ? 'blue' : 'success'}"
                           style="cursor: pointer; border: none; padding: 4px 8px;"
                           onclick="toggleCategoria(${c.id}, '${escapeHtml(c.categoria || 'MOD')}')"
                           title="Clique para alternar MOD/MOI">
                     ${escapeHtml(c.categoria || 'MOD')}
                   </button>
                 </td>
-                <td style="font-size: 12px; color: var(--text-muted);">${formatDate(c.data_importacao)}</td>
-                <td>
-                  <button class="btn btn-ghost btn-sm" onclick="deleteColaborador(${c.id}, '${escapeHtml(c.nome)}')" title="Desativar">
-                    🗑️
-                  </button>
+                <td style="display:flex; gap:4px;">
+                  <button class="btn btn-ghost btn-sm" onclick='editarColaborador(${c.id}, ${JSON.stringify(c)})' title="Editar">✏️</button>
+                  <button class="btn btn-ghost btn-sm" onclick="deleteColaborador(${c.id}, '${escapeHtml(c.nome)}')" title="Desativar">🗑️</button>
                 </td>
               </tr>
             `).join('')}
@@ -310,25 +311,119 @@ function exportarPlanilhaEfetivo() {
   showToast('Exportando planilha...', 'info', 3000);
 }
 
+/** Abre modal para editar colaborador existente */
+function editarColaborador(id, c) {
+  showModal('✏️ Editar Colaborador', `
+    <div style="display:flex; flex-direction:column; gap:12px; padding:4px 0;">
+      <div>
+        <label class="input-label">Nome Completo *</label>
+        <input class="input" type="text" id="editNome" value="${escapeHtml(c.nome || '')}" style="width:100%;" autofocus>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <div>
+          <label class="input-label">CPF</label>
+          <input class="input" type="text" id="editCpf" value="${escapeHtml(c.cpf ? formatCpf(c.cpf) : '')}" placeholder="000.000.000-00" style="width:100%;">
+        </div>
+        <div>
+          <label class="input-label">Matrícula</label>
+          <input class="input" type="text" id="editMatricula" value="${escapeHtml(c.matricula || '')}" placeholder="RE / Chapa" style="width:100%;">
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <div>
+          <label class="input-label">Cargo</label>
+          <input class="input" type="text" id="editCargo" value="${escapeHtml(c.cargo || '')}" placeholder="Ex: Encarregado" style="width:100%;">
+        </div>
+        <div>
+          <label class="input-label">Setor</label>
+          <input class="input" type="text" id="editSetor" value="${escapeHtml(c.setor || '')}" placeholder="Ex: Produção" style="width:100%;">
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <div>
+          <label class="input-label">Empresa</label>
+          <input class="input" type="text" id="editEmpresa" value="${escapeHtml(c.empresa || '')}" placeholder="Nome da empresa" style="width:100%;">
+        </div>
+        <div>
+          <label class="input-label">Categoria</label>
+          <select class="input" id="editCategoria" style="width:100%;">
+            <option value="MOD" ${c.categoria === 'MOD' ? 'selected' : ''}>MOD — Mão de Obra Direta</option>
+            <option value="MOI" ${c.categoria === 'MOI' ? 'selected' : ''}>MOI — Mão de Obra Indireta</option>
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="salvarEdicaoColaborador(${id})" style="width:100%; margin-top:4px;">Salvar Alterações</button>
+    </div>
+  `);
+}
+
+async function salvarEdicaoColaborador(id) {
+  const nome = document.getElementById('editNome')?.value?.trim();
+  if (!nome) { showToast('Informe o nome', 'warning'); return; }
+  const payload = {
+    nome,
+    cpf: document.getElementById('editCpf')?.value?.trim(),
+    matricula: document.getElementById('editMatricula')?.value?.trim(),
+    cargo: document.getElementById('editCargo')?.value?.trim(),
+    setor: document.getElementById('editSetor')?.value?.trim(),
+    empresa: document.getElementById('editEmpresa')?.value?.trim(),
+    categoria: document.getElementById('editCategoria')?.value,
+  };
+  try {
+    await apiCall(`/api/efetivo/colaboradores/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    closeModal();
+    showToast('Colaborador atualizado!', 'success');
+    const busca = document.getElementById('searchColabs')?.value || '';
+    loadColaboradores(busca);
+    const cadEfetEl = document.getElementById('cadTabEfetivo');
+    if (cadEfetEl && cadEfetEl.style.display !== 'none') cad.buscar('efet');
+  } catch(e) { showToast(`Erro: ${e.message}`, 'error'); }
+}
+
 /** Abre modal para adicionar pessoa manualmente */
 function abrirFormAdicionarPessoa() {
   showModal('➕ Adicionar Pessoa', `
-    <div style="display:flex; flex-direction:column; gap:14px; padding:4px 0;">
+    <div style="display:flex; flex-direction:column; gap:12px; padding:4px 0;">
       <div>
         <label class="input-label">Nome Completo *</label>
         <input class="input" type="text" id="addNome" placeholder="Nome completo" style="width:100%;" autofocus>
       </div>
-      <div>
-        <label class="input-label">CPF</label>
-        <input class="input" type="text" id="addCpf" placeholder="000.000.000-00" style="width:100%;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <div>
+          <label class="input-label">CPF</label>
+          <input class="input" type="text" id="addCpf" placeholder="000.000.000-00" style="width:100%;">
+        </div>
+        <div>
+          <label class="input-label">Matrícula</label>
+          <input class="input" type="text" id="addMatricula" placeholder="RE / Chapa" style="width:100%;">
+        </div>
       </div>
-      <div>
-        <label class="input-label">Empresa</label>
-        <input class="input" type="text" id="addEmpresa" placeholder="Nome da empresa" style="width:100%;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <div>
+          <label class="input-label">Cargo</label>
+          <input class="input" type="text" id="addCargo" placeholder="Ex: Motorista, Técnico..." style="width:100%;">
+        </div>
+        <div>
+          <label class="input-label">Setor</label>
+          <input class="input" type="text" id="addSetor" placeholder="Ex: Produção" style="width:100%;">
+        </div>
       </div>
-      <div>
-        <label class="input-label">Cargo</label>
-        <input class="input" type="text" id="addCargo" placeholder="Ex: Motorista, Técnico..." style="width:100%;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <div>
+          <label class="input-label">Empresa</label>
+          <input class="input" type="text" id="addEmpresa" placeholder="Nome da empresa" style="width:100%;">
+        </div>
+        <div>
+          <label class="input-label">Categoria</label>
+          <select class="input" id="addCategoria" style="width:100%;">
+            <option value="MOD">MOD — Mão de Obra Direta</option>
+            <option value="MOI">MOI — Mão de Obra Indireta</option>
+          </select>
+        </div>
       </div>
       <button class="btn btn-primary" onclick="salvarNovaPessoa()" style="width:100%; margin-top:4px;">Salvar</button>
     </div>
@@ -340,14 +435,17 @@ async function salvarNovaPessoa() {
   if (!nome) { showToast('Informe o nome', 'warning'); return; }
 
   const cpf = document.getElementById('addCpf')?.value?.trim();
-  const empresa = document.getElementById('addEmpresa')?.value?.trim();
+  const matricula = document.getElementById('addMatricula')?.value?.trim();
   const cargo = document.getElementById('addCargo')?.value?.trim();
+  const setor = document.getElementById('addSetor')?.value?.trim();
+  const empresa = document.getElementById('addEmpresa')?.value?.trim();
+  const categoria = document.getElementById('addCategoria')?.value;
 
   try {
     const data = await apiCall('/api/efetivo/adicionar', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nome, cpf, empresa, cargo })
+      body: JSON.stringify({ nome, cpf, matricula, cargo, setor, empresa, categoria })
     });
     closeModal();
     const acao = data.acao === 'criado' ? 'adicionado' : 'atualizado';
@@ -502,6 +600,7 @@ function rejectVinculo(idx) {
 let pteAcumulado = {}; // { 'DD/MM/YYYY': [ {nome, cpf, matricula, cargo}, ... ] }
 let ptePdfFilenames = []; // stored PDF filenames returned by the server
 let ptePermissoesAcumulado = []; // [{numero_pt, descricao}] extraídas dos PDFs
+let pteObraAcumulado = []; // [{arquivo, id_atividade, id_pte, descricao}] para Histórico PTe
 
 async function handlePteUpload(input) {
   const files = Array.from(input.files);
@@ -566,6 +665,11 @@ async function handlePteUpload(input) {
           for (const pt of (res.permissoes || [])) {
             const jaExiste = ptePermissoesAcumulado.some(p => p.numero_pt === pt.numero_pt && p.numero_pt);
             if (!jaExiste) ptePermissoesAcumulado.push(pt);
+          }
+
+          // Coletar dados PTe Obra (id_atividade, id_pte, descricao)
+          if (res.pte_obra) {
+            pteObraAcumulado.push({ arquivo: res.arquivo || file.name, ...res.pte_obra });
           }
         }
       }
@@ -688,10 +792,14 @@ async function confirmarProcessamentoPte() {
     await apiCall('/api/pte/confirmar', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ resultados: pteAcumulado, pdfs: ptePdfFilenames, permissoes: ptePermissoesAcumulado })
+      body: JSON.stringify({ resultados: pteAcumulado, pdfs: ptePdfFilenames, permissoes: ptePermissoesAcumulado, pte_obra: pteObraAcumulado })
     });
     hideLoading();
     showToast('Processamento salvo no histórico!', 'success');
+    // Atualiza automaticamente o Histórico PTe em Planejamento de Obras
+    if (typeof plan !== 'undefined' && plan.pteObraCarregarRegistros) {
+      plan.pteObraCarregarRegistros();
+    }
     limparResultadosPTE();
   } catch (e) {
     hideLoading();
@@ -722,6 +830,7 @@ function limparResultadosPTE() {
   pteAcumulado = {};
   ptePdfFilenames = [];
   ptePermissoesAcumulado = [];
+  pteObraAcumulado = [];
   document.getElementById('pteGroupsContainer').innerHTML = '';
   document.getElementById('pteResults').style.display = 'none';
   document.getElementById('pteEmptyState').style.display = 'block';
@@ -1675,7 +1784,7 @@ const plan = (() => {
       const el = document.getElementById(id);
       if (el) el.style.display = (k === nome ? '' : 'none');
     });
-    if (nome === 'historico-pte') loadHistorico();
+    if (nome === 'historico-pte') pteObraCarregarRegistros();
     if (nome === 'capital') cad.init();
     if (nome === 'dashboard-op') { _carregarDashboardOp(); }
   }
@@ -1689,7 +1798,7 @@ const plan = (() => {
     });
     if (!_pid) return;
     if (nome === 'gantt') _renderGantt(_filtrarTarefas());
-    if (nome === 'curvas') _renderCurvaS();
+    if (nome === 'curvas') { _renderCurvaS(); _renderCurvaSTabela(); }
     if (nome === 'histograma') _renderHistograma();
     if (nome === 'lista') _renderLista(_filtrarTarefas());
     if (nome === 'editor') _iniciarEditor();
@@ -1716,8 +1825,8 @@ const plan = (() => {
       return { label: `${fmt(s)}-${fmt(e)}`, week: sem, mon: s };
     };
 
-    const offsets = { 's-1': -1, 's0': 0, 's1': 1, 's2': 2 };
-    const names   = { 's-1': 'S-1', 's0': 'S+0', 's1': 'S+1', 's2': 'S+2' };
+    const offsets = { 'sm1': -2, 's0': -1, 's1': 0, 's2': 1 };
+    const names   = { 'sm1': 'S-1', 's0': 'S+0', 's1': 'S+1', 's2': 'S+2' };
     Object.entries(offsets).forEach(([key, off]) => {
       const btn = document.querySelector(`.plan-filtro[data-f="${key}"]`);
       if (!btn) return;
@@ -1818,7 +1927,7 @@ const plan = (() => {
     const hoje = new Date(); hoje.setHours(0,0,0,0);
     const seg = d => { const r = new Date(hoje); r.setDate(r.getDate() - r.getDay() + 1 + d*7); return r; };
     const ini = {
-      's-1': seg(-1), 's0': seg(0), 's1': seg(1), 's2': seg(2)
+      'sm1': seg(-2), 's0': seg(-1), 's1': seg(0), 's2': seg(1)
     }[_filtro];
     const fim = new Date(ini); fim.setDate(fim.getDate() + 6);
     return _tarefas.filter(t => {
@@ -1851,6 +1960,10 @@ const plan = (() => {
           sel.appendChild(o);
         });
       });
+      // Auto-selecionar primeiro projeto se ainda não há nenhum selecionado
+      if (!_pid && projetos.length > 0) {
+        await selecionarProjeto(projetos[0].id);
+      }
     } catch(e) { /* silencioso */ }
   }
 
@@ -1892,8 +2005,9 @@ const plan = (() => {
       const hoje = new Date(); hoje.setHours(0,0,0,0);
       const _getMon = off => { const d = new Date(hoje); d.setDate(d.getDate() - d.getDay() + 1 + off*7); return d; };
       const _getSun = off => { const d = _getMon(off); d.setDate(d.getDate()+6); return d; };
-      const s0Mon = _getMon(0); const s0Sun = _getSun(0);
-      const s1Mon = _getMon(1); const s1Sun = _getSun(1);
+      // Convenção: S-1=2 semanas atrás, S+0=semana anterior, S+1=semana atual, S+2=próxima
+      const s0Mon = _getMon(-1); const s0Sun = _getSun(-1);
+      const s1Mon = _getMon(0);  const s1Sun = _getSun(0);
       const _semNom = (m,s) => `${String(m.getDate()).padStart(2,'0')}/${String(m.getMonth()+1).padStart(2,'0')} a ${String(s.getDate()).padStart(2,'0')}/${String(s.getMonth()+1).padStart(2,'0')}`;
       const _tarefasSem = (m,s) => _tarefas.filter(t => {
         if ((t.nivel||0) === 0) return false;
@@ -1986,15 +2100,15 @@ const plan = (() => {
           </div>
         </div>
 
-        <!-- Atividades S+0 e S+1 -->
+        <!-- Atividades S+1 e S+2 -->
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
           <div class="card">
-            <div class="card-header"><div class="card-title">✅ Atividades S+0 (${_semNom(s0Mon,s0Sun)})</div></div>
-            <ul style="margin:0; padding-left:18px; line-height:1.8; font-size:13px;">${_listaAtiv(_tarefasSem(s0Mon,s0Sun))}</ul>
+            <div class="card-header"><div class="card-title">✅ Atividades S+1 — Semana Atual (${_semNom(s1Mon,s1Sun)})</div></div>
+            <ul style="margin:0; padding-left:18px; line-height:1.8; font-size:13px;">${_listaAtiv(_tarefasSem(s1Mon,s1Sun))}</ul>
           </div>
           <div class="card">
-            <div class="card-header"><div class="card-title">📅 Atividades S+1 (${_semNom(s1Mon,s1Sun)})</div></div>
-            <ul style="margin:0; padding-left:18px; line-height:1.8; font-size:13px;">${_listaAtiv(_tarefasSem(s1Mon,s1Sun))}</ul>
+            <div class="card-header"><div class="card-title">📅 Atividades S+2 — Próxima Semana</div></div>
+            <ul style="margin:0; padding-left:18px; line-height:1.8; font-size:13px;">${_listaAtiv(_tarefasSem(_getMon(1),_getSun(1)))}</ul>
           </div>
         </div>
 
@@ -2040,7 +2154,8 @@ const plan = (() => {
   }
 
   function _resetUI() {
-    document.getElementById('planKpis').style.display = 'none';
+    const elKpis = document.getElementById('planKpis');
+    if (elKpis) elKpis.style.display = 'none';
     document.getElementById('ganttContainer').innerHTML = '<div class="empty-state" style="padding:60px;"><div class="empty-state-icon">📊</div><div class="empty-state-title">Selecione um projeto</div></div>';
     document.getElementById('btnImportar').disabled = true;
     document.getElementById('btnExportar').disabled = true;
@@ -2075,11 +2190,16 @@ const plan = (() => {
     const avanco = pesoTotal > 0
       ? atividades.reduce((s, t) => s + (t.peso || 1) * (t.progresso || 0) / 100, 0) / pesoTotal * 100
       : 0;
-    document.getElementById('planTotalTarefas').textContent = atividades.length;
-    document.getElementById('planConcluidas').textContent = concluidas;
-    document.getElementById('planEmAndamento').textContent = andamento;
-    document.getElementById('planAvanco').textContent = avanco.toFixed(1) + '%';
-    document.getElementById('planKpis').style.display = '';
+    const elTotal = document.getElementById('planTotalTarefas');
+    const elConc = document.getElementById('planConcluidas');
+    const elAnd = document.getElementById('planEmAndamento');
+    const elAv = document.getElementById('planAvanco');
+    const elKpis = document.getElementById('planKpis');
+    if (elTotal) elTotal.textContent = atividades.length;
+    if (elConc) elConc.textContent = concluidas;
+    if (elAnd) elAnd.textContent = andamento;
+    if (elAv) elAv.textContent = avanco.toFixed(1) + '%';
+    if (elKpis) elKpis.style.display = 'flex';
   }
 
   function novoProjetoModal() {
@@ -2194,24 +2314,38 @@ const plan = (() => {
     const _curMon = new Date(_todayRef); _curMon.setDate(_todayRef.getDate() - _daysToMon);
 
     const _weekLabel = (monDate) => {
+      // S+1=atual, S+0=anterior, S-1=2semanas atrás, S+2=próxima
       const diff = Math.round((monDate - _curMon) / (7 * 86400000));
-      if (diff === 0) return 'S+0';
-      return diff > 0 ? `S+${diff}` : `S${diff}`;
+      if (diff === 0)  return 'S+1';
+      if (diff === -1) return 'S+0';
+      if (diff === -2) return 'S-1';
+      if (diff > 0)    return `S+${diff + 1}`;
+      return `S${diff}`;
     };
+
+    // Semana selecionada pelo filtro (não 'tudo')
+    const _filtroSemLabel = { 'sm1': 'S-1', 's0': 'S+0', 's1': 'S+1', 's2': 'S+2' }[_filtro] || null;
 
     // week bars — começam na Segunda
     let wd = new Date(minD); wd.setDate(wd.getDate() - ((wd.getDay() + 6) % 7));
     let wi = 0;
+    let _selWeekX = null;
     while (wd <= maxD) {
       const wx = Math.max(0, Math.round((wd - minD) / 86400000) * DAY_W);
       const slabel = _weekLabel(new Date(wd));
-      const isCurWeek = slabel === 'S+0';
-      const bgFill = isCurWeek ? '#d1fae5' : (wi%2===0 ? '#f3faf5' : '#e8f5ec');
-      const txtColor = isCurWeek ? '#065f46' : '#4a7c59';
-      const strokeW = isCurWeek ? 1.5 : 0.5;
-      const strokeC = isCurWeek ? '#16a34a' : '#d1e8d8';
+      const isCurWeek = slabel === 'S+1';
+      const isSelWeek = _filtroSemLabel && slabel === _filtroSemLabel && !isCurWeek;
+      if (_filtroSemLabel && slabel === _filtroSemLabel && _selWeekX === null) _selWeekX = wx;
+      let bgFill, txtColor, strokeW, strokeC;
+      if (isCurWeek) {
+        bgFill = '#d1fae5'; txtColor = '#065f46'; strokeW = 1.5; strokeC = '#16a34a';
+      } else if (isSelWeek) {
+        bgFill = '#dbeafe'; txtColor = '#1e40af'; strokeW = 1.5; strokeC = '#3b82f6';
+      } else {
+        bgFill = wi%2===0 ? '#f3faf5' : '#e8f5ec'; txtColor = '#4a7c59'; strokeW = 0.5; strokeC = '#d1e8d8';
+      }
       hdr += `<rect x="${wx}" y="28" width="${7*DAY_W}" height="28" fill="${bgFill}" stroke="${strokeC}" stroke-width="${strokeW}"/>`;
-      hdr += `<text x="${wx+3}" y="41" fill="${txtColor}" font-size="9" font-family="Inter,sans-serif" font-weight="${isCurWeek?700:400}">${wd.getDate()}/${wd.getMonth()+1}</text>`;
+      hdr += `<text x="${wx+3}" y="41" fill="${txtColor}" font-size="9" font-family="Inter,sans-serif" font-weight="${isCurWeek||isSelWeek?700:400}">${wd.getDate()}/${wd.getMonth()+1}</text>`;
       hdr += `<text x="${wx+3}" y="53" fill="${txtColor}" font-size="9" font-family="Inter,sans-serif" font-weight="700">${slabel}</text>`;
       wd.setDate(wd.getDate() + 7); wi++;
     }
@@ -2283,14 +2417,28 @@ const plan = (() => {
     rs.addEventListener('scroll', () => { ls.scrollTop = rs.scrollTop; hx.scrollLeft = rs.scrollLeft; });
     ls.addEventListener('scroll', () => { rs.scrollTop = ls.scrollTop; });
 
-    // Scroll para hoje automaticamente (centra na data atual)
+    // Scroll: se filtro de semana ativo → centra nessa semana; senão centra em hoje
     setTimeout(() => {
-      const todayX = Math.round((new Date() - minD) / 86400000) * DAY_W;
-      rs.scrollLeft = Math.max(0, todayX - rs.clientWidth / 2 + DAY_W * 3);
+      let targetX;
+      if (_selWeekX !== null) {
+        targetX = _selWeekX - rs.clientWidth / 2 + 7 * DAY_W / 2;
+      } else {
+        const todayX = Math.round((new Date() - minD) / 86400000) * DAY_W;
+        targetX = todayX - rs.clientWidth / 2 + DAY_W * 3;
+      }
+      rs.scrollLeft = Math.max(0, targetX);
     }, 60);
   }
 
   // ── Curva S ────────────────────────────────
+  let _curvaSType = 'line';
+
+  function setCurvaSType(tipo) {
+    _curvaSType = tipo;
+    document.querySelectorAll('.curvaS-tipo-btn').forEach(b => b.classList.toggle('active', b.dataset.tipo === tipo));
+    _renderCurvaS();
+  }
+
   async function _renderCurvaS() {
     if (!_pid) return;
     try {
@@ -2298,33 +2446,42 @@ const plan = (() => {
       if (_charts.curvaS) { _charts.curvaS.destroy(); delete _charts.curvaS; }
       const ctx = document.getElementById('curvaSChart')?.getContext('2d');
       if (!ctx) return;
-      const hoje = new Date().toISOString().slice(0,10);
+      const tipo = _curvaSType;
+      const isBar = tipo === 'bar';
       _charts.curvaS = new Chart(ctx, {
-        type: 'line',
+        type: tipo,
         data: {
           labels: d.labels.map(l => { const dt = new Date(l+'T12:00:00'); return `${dt.getDate()}/${dt.getMonth()+1}`; }),
           datasets: [
-            { label: 'Previsto (%)', data: d.previsto, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', borderWidth: 2, fill: true, tension: 0.4, pointRadius: 2 },
-            { label: 'Real (%)', data: d.real, borderColor: '#16a34a', backgroundColor: 'rgba(22,163,74,0.1)', borderWidth: 2.5, fill: true, tension: 0.4, pointRadius: 3, spanGaps: false },
+            {
+              label: 'Previsto (%)', data: d.previsto, borderColor: '#3b82f6',
+              backgroundColor: isBar ? 'rgba(59,130,246,0.7)' : 'rgba(59,130,246,0.1)',
+              borderWidth: isBar ? 0 : 2, fill: !isBar, tension: 0.4, pointRadius: isBar ? 0 : 2,
+              borderRadius: isBar ? 3 : 0
+            },
+            {
+              label: 'Real (%)', data: d.real, borderColor: '#16a34a',
+              backgroundColor: isBar ? 'rgba(22,163,74,0.8)' : 'rgba(22,163,74,0.1)',
+              borderWidth: isBar ? 0 : 2.5, fill: !isBar, tension: 0.4, pointRadius: isBar ? 0 : 3,
+              spanGaps: false, borderRadius: isBar ? 3 : 0
+            }
           ]
         },
         options: {
           responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { position: 'top' }, tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${(ctx.parsed.y||0).toFixed(1)}%` } } },
+          plugins: { legend: { position: 'top' }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${(c.parsed.y||0).toFixed(1)}%` } } },
           scales: {
             y: { min: 0, max: 100, ticks: { callback: v => v + '%' }, grid: { color: '#f0f0f0' } },
             x: { grid: { color: '#f0f0f0' } }
           }
         }
       });
-      // Desvio
       const real = d.real.filter(v => v !== null);
       const prev = d.previsto.slice(0, real.length);
       if (real.length && prev.length) {
         const desvio = (real[real.length-1] || 0) - (prev[real.length-1] || 0);
         const box = document.getElementById('curvaSDesvio');
-        box.style.display = '';
-        box.innerHTML = `<span class="${desvio >= 0 ? 'desvio-adiantado' : 'desvio-atrasado'}">${desvio >= 0 ? '▲' : '▼'} Desvio atual: ${Math.abs(desvio).toFixed(1)} pp ${desvio >= 0 ? '(adiantado)' : '(atrasado)'}</span>`;
+        if (box) { box.style.display = ''; box.innerHTML = `<span class="${desvio >= 0 ? 'desvio-adiantado' : 'desvio-atrasado'}">${desvio >= 0 ? '▲' : '▼'} Desvio atual: ${Math.abs(desvio).toFixed(1)} pp ${desvio >= 0 ? '(adiantado)' : '(atrasado)'}</span>`; }
       }
     } catch(e) { showToast('Erro ao carregar Curva S', 'error'); }
   }
@@ -2610,17 +2767,24 @@ const plan = (() => {
     if (!_pid || !_tarefas.length) return;
 
     const MESES_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+    const hoje = new Date(); hoje.setHours(0,0,0,0);
+
+    const _fmt = d => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
+
+    const _calcNumSem = d => {
+      const dt2 = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+      const dayN = dt2.getUTCDay() || 7; dt2.setUTCDate(dt2.getUTCDate() + 4 - dayN);
+      const yrS = new Date(Date.UTC(dt2.getUTCFullYear(), 0, 1));
+      return Math.ceil((((dt2 - yrS) / 86400000) + 1) / 7);
+    };
 
     const _verb = (t, seg, dom) => {
       const ini = t.inicio_previsto ? new Date(t.inicio_previsto + 'T00:00:00') : null;
       const fim = t.fim_previsto   ? new Date(t.fim_previsto   + 'T00:00:00') : null;
       if (!ini) return 'Dar continuidade em';
-      const startsSemana = ini >= seg && ini <= dom;
-      const endsSemana   = fim && fim >= seg && fim <= dom;
-      const startsBefore = ini < seg;
-      if (startsSemana && endsSemana) return 'Executar';
-      if (startsSemana) return 'Iniciar';
-      if (endsSemana) return 'Finalizar';
+      if (ini >= seg && ini <= dom && fim && fim >= seg && fim <= dom) return 'Executar';
+      if (ini >= seg && ini <= dom) return 'Iniciar';
+      if (fim && fim >= seg && fim <= dom) return 'Finalizar';
       return 'Dar continuidade em';
     };
 
@@ -2629,69 +2793,258 @@ const plan = (() => {
       const linhas = tarefasSem.map(t => {
         const verb = _verb(t, sem.seg, sem.dom);
         const nome = t.nome.trim();
-        // If task name already starts with (SOMETHING), keep it; prepend verb after the parenthesis
         const m = nome.match(/^(\([^)]+\))\s*(.*)/);
-        if (m) {
-          return `${m[1]} ${verb} ${m[2].charAt(0).toLowerCase() + m[2].slice(1)}.`;
-        }
-        // If responsavel field set, prepend it
-        if (t.responsavel) {
-          return `(${t.responsavel.toUpperCase()}) ${verb} ${nome.charAt(0).toLowerCase() + nome.slice(1)}.`;
-        }
+        if (m) return `${m[1]} ${verb} ${m[2].charAt(0).toLowerCase() + m[2].slice(1)}.`;
+        if (t.responsavel) return `(${t.responsavel.toUpperCase()}) ${verb} ${nome.charAt(0).toLowerCase() + nome.slice(1)}.`;
         return `${verb} ${nome}.`;
       });
       return header + '\n' + linhas.join('\n');
     };
 
-    const _tarefasNaSemana = (seg, dom) => {
-      return _tarefas.filter(t => {
-        if (t.nivel === 0) return false; // skip top-level groups
-        const ini = t.inicio_previsto ? new Date(t.inicio_previsto + 'T00:00:00') : null;
-        const fim = t.fim_previsto   ? new Date(t.fim_previsto   + 'T00:00:00') : null;
-        if (!ini) return false;
-        return ini <= dom && (!fim || fim >= seg);
-      });
+    // Build set of codigos that are parents (have children)
+    const _parentCods = new Set();
+    _tarefas.forEach(t => {
+      if (t.codigo && t.codigo.includes('.')) {
+        const parts = t.codigo.split('.');
+        for (let i = 1; i < parts.length; i++) _parentCods.add(parts.slice(0, i).join('.'));
+      }
+    });
+
+    const _tarefasNaSemana = (seg, dom) => _tarefas.filter(t => {
+      if (t.nivel === 0) return false;                       // top-level groups
+      if (t.codigo && _parentCods.has(t.codigo)) return false; // parent topics with children
+      const ini = t.inicio_previsto ? new Date(t.inicio_previsto + 'T00:00:00') : null;
+      const fim = t.fim_previsto   ? new Date(t.fim_previsto   + 'T00:00:00') : null;
+      if (!ini) return false;
+      return ini <= dom && (!fim || fim >= seg);
+    });
+
+    const _gerarTexto = (mesIdx, ano, modoFiltro) => {
+      // Semana específica (S-1, S+0, S+1, S+2)
+      if (modoFiltro && modoFiltro !== 'tudo') {
+        const diasSeg = hoje.getDay() === 0 ? 6 : hoje.getDay() - 1;
+        const baseSeg = new Date(hoje); baseSeg.setDate(hoje.getDate() - diasSeg);
+        const off = { 'sm1': -2, 's0': -1, 's1': 0, 's2': 1 }[modoFiltro] || 0;
+        const semSeg = new Date(baseSeg); semSeg.setDate(baseSeg.getDate() + off * 7);
+        const semDom = new Date(semSeg); semDom.setDate(semSeg.getDate() + 6);
+        const numSem = _calcNumSem(semSeg);
+        const semInfo = { seg: semSeg, dom: semDom, label: `${_fmt(semSeg)}-${_fmt(semDom)}`, semNum: numSem };
+        const tf = _tarefasNaSemana(semSeg, semDom);
+        const titulo = `ATIVIDADES ${modoFiltro.toUpperCase()} — SEMANA ${numSem} (${_fmt(semSeg)} a ${_fmt(semDom)})`;
+        return titulo + '\n' + '='.repeat(titulo.length) + '\n\n' + (tf.length ? _buildBloco(tf, semInfo) : '(Nenhuma atividade nesta semana)');
+      }
+      // Mês completo
+      const primeiroDiaMes = new Date(ano, mesIdx, 1);
+      const ultimoDiaMes   = new Date(ano, mesIdx + 1, 0);
+      let seg = new Date(primeiroDiaMes);
+      const wd = seg.getDay();
+      seg.setDate(seg.getDate() - (wd === 0 ? 6 : wd - 1));
+      const blocos = [];
+      while (seg <= ultimoDiaMes) {
+        const dom = new Date(seg); dom.setDate(seg.getDate() + 6);
+        const semFinal = { seg: new Date(seg), dom: new Date(dom), label: `${_fmt(seg)}-${_fmt(dom)}`, semNum: _calcNumSem(seg) };
+        const tf = _tarefasNaSemana(seg, dom);
+        if (tf.length) blocos.push(_buildBloco(tf, semFinal));
+        seg.setDate(seg.getDate() + 7);
+      }
+      const titulo = `RELATÓRIO MENSAL DE ATIVIDADES — ${MESES_PT[mesIdx].toUpperCase()} ${ano}`;
+      return titulo + '\n' + '='.repeat(titulo.length) + '\n\n' + (blocos.length ? blocos.join('\n\n---\n\n') : '(Nenhuma atividade programada para este período)');
     };
 
-    const hoje = new Date(); hoje.setHours(0,0,0,0);
-    const mesAtual = hoje.getMonth();
-    const anoAtual = hoje.getFullYear();
-
-    // Build month's weeks
-    const primeiroDiaMes = new Date(anoAtual, mesAtual, 1);
-    const ultimoDiaMes   = new Date(anoAtual, mesAtual + 1, 0);
-    // Find first Monday of or before first day of month
-    let seg = new Date(primeiroDiaMes);
-    const wd = seg.getDay();
-    seg.setDate(seg.getDate() - (wd === 0 ? 6 : wd - 1));
-
-    const blocos = [];
-    while (seg <= ultimoDiaMes) {
-      const dom = new Date(seg); dom.setDate(seg.getDate() + 6);
-      const fmt = d => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
-      const dt2 = new Date(Date.UTC(seg.getFullYear(), seg.getMonth(), seg.getDate()));
-      const dayN = dt2.getUTCDay() || 7; dt2.setUTCDate(dt2.getUTCDate() + 4 - dayN);
-      const yrS = new Date(Date.UTC(dt2.getUTCFullYear(), 0, 1));
-      const numSem = Math.ceil((((dt2 - yrS) / 86400000) + 1) / 7);
-      const semFinal = { seg: new Date(seg), dom: new Date(dom), label: `${fmt(seg)}-${fmt(dom)}`, semNum: numSem };
-      const tf = _tarefasNaSemana(seg, dom);
-      if (tf.length) blocos.push(_buildBloco(tf, semFinal));
-      seg.setDate(seg.getDate() + 7);
+    // Build month/year options
+    const options = [];
+    for (let y = hoje.getFullYear() - 1; y <= hoje.getFullYear() + 2; y++) {
+      for (let m = 0; m < 12; m++) {
+        const sel = (y === hoje.getFullYear() && m === hoje.getMonth()) ? ' selected' : '';
+        options.push(`<option value="${y}-${m}"${sel}>${MESES_PT[m]} ${y}</option>`);
+      }
     }
 
-    const titulo = `RELATÓRIO MENSAL DE ATIVIDADES — ${MESES_PT[mesAtual].toUpperCase()} ${anoAtual}`;
-    const textoCompleto = titulo + '\n' + '='.repeat(titulo.length) + '\n\n' + blocos.join('\n\n---\n\n');
+    const textoInicial = _gerarTexto(hoje.getMonth(), hoje.getFullYear(), null);
+
+    // Bridge closures
+    window._plan_gerarRelatorio = () => {
+      const sel = document.getElementById('relMes'); if (!sel) return;
+      const [ano, mes] = sel.value.split('-').map(Number);
+      document.getElementById('relatorioTexto').value = _gerarTexto(mes, ano, null);
+    };
+    window._plan_relFiltro = f => {
+      document.getElementById('relatorioTexto').value = _gerarTexto(null, null, f);
+    };
 
     showModal('📋 Relatório de Atividades', `
-      <div style="display:flex; flex-direction:column; gap:12px; min-width:560px;">
+      <div style="display:flex; flex-direction:column; gap:12px; min-width:720px; max-width:900px;">
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-          <span style="font-size:13px; color:var(--text-muted); flex:1;">${MESES_PT[mesAtual]} ${anoAtual} · ${blocos.length} semana(s) com atividades</span>
-          <button class="btn btn-primary btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('relatorioTexto').value).then(()=>showToast('Copiado!','success',1500))">
-            📋 Copiar Tudo
-          </button>
+          <select class="input" id="relMes" style="width:200px; font-size:13px;" onchange="_plan_gerarRelatorio()">
+            ${options.join('')}
+          </select>
+          <span style="font-size:11px; color:var(--text-muted);">ou ver semana:</span>
+          <div style="display:flex; gap:3px;">
+            <button class="btn btn-ghost btn-sm" style="font-size:11px; padding:4px 8px;" onclick="_plan_relFiltro('sm1')">S-1</button>
+            <button class="btn btn-ghost btn-sm" style="font-size:11px; padding:4px 8px;" onclick="_plan_relFiltro('s0')">S+0</button>
+            <button class="btn btn-ghost btn-sm" style="font-size:11px; padding:4px 8px;" onclick="_plan_relFiltro('s1')">S+1 (atual)</button>
+            <button class="btn btn-ghost btn-sm" style="font-size:11px; padding:4px 8px;" onclick="_plan_relFiltro('s2')">S+2</button>
+          </div>
+          <div style="flex:1;"></div>
+          <button class="btn btn-primary btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('relatorioTexto').value).then(()=>showToast('Copiado!','success',1500))">📋 Copiar</button>
         </div>
-        <textarea id="relatorioTexto" readonly style="width:100%; height:420px; font-family:'JetBrains Mono',monospace; font-size:12px; line-height:1.6; background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:8px; padding:12px; color:var(--text-primary); resize:vertical;">${textoCompleto}</textarea>
+        <textarea id="relatorioTexto" readonly style="width:100%; height:520px; font-family:'JetBrains Mono',monospace; font-size:12px; line-height:1.6; background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:8px; padding:12px; color:var(--text-primary); resize:vertical;">${escapeHtml(textoInicial)}</textarea>
       </div>`);
+  }
+
+  // ── Calculadora de Horas ───────────────────
+  function calculadoraHoras() {
+    showModal('⏱️ Calculadora de Horas do Projeto', `
+      <div style="display:flex; flex-direction:column; gap:16px; min-width:340px;">
+        <div style="padding:12px; background:rgba(59,130,246,0.07); border-radius:8px; font-size:13px; color:var(--text-secondary); line-height:1.6;">
+          Calcule o percentual de horas realizadas em relação ao total previsto.<br>
+          <strong>Horas Totais = 100% → Horas Reais = ?%</strong>
+        </div>
+        <div>
+          <label class="input-label">Horas Totais do Projeto (= 100%)</label>
+          <input class="input" type="number" id="calcHorasTotal" min="0" step="0.5" placeholder="Ex: 5000" oninput="_plan_calcHoras()" style="width:100%;" autofocus>
+        </div>
+        <div>
+          <label class="input-label">Horas Reais Trabalhadas</label>
+          <input class="input" type="number" id="calcHorasReais" min="0" step="0.5" placeholder="Ex: 2350" oninput="_plan_calcHoras()" style="width:100%;">
+        </div>
+        <div id="calcResultado" style="text-align:center; padding:22px; background:var(--bg-secondary); border-radius:10px; display:none;">
+          <div style="font-size:48px; font-weight:800; line-height:1;" id="calcPct">—</div>
+          <div style="font-size:13px; color:var(--text-muted); margin-top:6px;">das horas do projeto realizadas</div>
+          <div style="font-size:12px; color:var(--text-muted); margin-top:10px; border-top:1px solid var(--border-subtle); padding-top:10px;" id="calcDetalhe"></div>
+        </div>
+      </div>`);
+
+    window._plan_calcHoras = () => {
+      const total = parseFloat(document.getElementById('calcHorasTotal')?.value);
+      const reais = parseFloat(document.getElementById('calcHorasReais')?.value);
+      const res = document.getElementById('calcResultado');
+      const pct = document.getElementById('calcPct');
+      const det = document.getElementById('calcDetalhe');
+      if (!isNaN(total) && !isNaN(reais) && total > 0) {
+        const perc = reais / total * 100;
+        res.style.display = '';
+        pct.textContent = perc.toFixed(2) + '%';
+        pct.style.color = perc >= 100 ? '#16a34a' : perc >= 75 ? '#f59e0b' : 'var(--primary-600)';
+        const restantes = total - reais;
+        det.innerHTML = `<strong>${reais.toLocaleString('pt-BR')}h</strong> realizadas de <strong>${total.toLocaleString('pt-BR')}h</strong> totais<br>${restantes > 0 ? `<span style="color:var(--text-muted);">${restantes.toLocaleString('pt-BR')}h restantes</span>` : '<span style="color:#16a34a; font-weight:600;">Projeto concluído!</span>'}`;
+      } else {
+        if (res) res.style.display = 'none';
+      }
+    };
+  }
+
+  // ── Linha de Base — Tabela Transposta (tudo editável) ──
+  async function _renderCurvaSTabela() {
+    const wrapper = document.getElementById('curvaSLineBase');
+    if (!_pid || !wrapper) return;
+    wrapper.innerHTML = '<div style="padding:16px; color:var(--text-muted); font-size:13px;">Carregando linha de base...</div>';
+    try {
+      const d = await apiCall(`/api/projetos/${_pid}/curva-s-semanal`);
+      const semanas = d.semanas || [];
+      if (!semanas.length) {
+        wrapper.innerHTML = '<div class="empty-state" style="padding:30px;"><div class="empty-state-title">Sem dados de cronograma</div></div>';
+        return;
+      }
+
+      // localStorage key stores ALL overrides: { prevSem:{}, prevAc:{}, realSem:{}, realAc:{} }
+      const storKey = `curvaSAll_${_pid}`;
+      let ov = { prevSem:{}, prevAc:{}, realSem:{}, realAc:{} };
+      try { const s = localStorage.getItem(storKey); if (s) ov = { ...ov, ...JSON.parse(s) }; } catch {}
+
+      const _get = (row, i, auto) => ov[row][i] !== undefined ? ov[row][i] : auto;
+
+      // Apply and calculate rows
+      const rows = semanas.map((s, i) => ({
+        semana:     s.semana,
+        seg:        s.seg,
+        prevSem:    _get('prevSem', i, s.previsto_sem),
+        prevAc:     _get('prevAc',  i, s.previsto_ac),
+        realSem:    _get('realSem', i, s.real_sem),
+        realAc:     _get('realAc',  i, s.real_ac),
+        mPrevSem:   ov.prevSem[i] !== undefined,
+        mPrevAc:    ov.prevAc[i]  !== undefined,
+        mRealSem:   ov.realSem[i] !== undefined,
+        mRealAc:    ov.realAc[i]  !== undefined,
+      }));
+
+      const fmtDate = iso => { const dt = new Date(iso+'T12:00:00'); return `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}`; };
+      const fmtPct  = v => v !== null && v !== undefined ? Number(v).toFixed(2).replace('.', ',') + '%' : '';
+
+      // Editable cell builder
+      const edCell = (rowKey, i, val, manual, bgBase) => {
+        const bg = manual ? 'rgba(59,130,246,0.10)' : bgBase;
+        const v = val !== null && val !== undefined ? fmtPct(val) : '';
+        return `<td contenteditable="true"
+          style="text-align:right; font-size:11px; padding:3px 6px; min-width:58px; cursor:text; outline:none; background:${bg};"
+          onfocus="this._orig=this.textContent; this.style.background='rgba(59,130,246,0.18)';"
+          onblur="_plan_saveCurvaCell('${rowKey}',${i},this)">${v}</td>`;
+      };
+
+      const mkRow = (rowKey, labelNum, label, bgColor, cells) => {
+        const lbl = `<td style="font-size:11px; padding:5px 10px; white-space:nowrap; position:sticky; left:0; z-index:2; background:${bgColor}; border-right:2px solid var(--border-subtle); font-weight:${labelNum?'600':'400'};">${labelNum?`<span style="opacity:0.45;margin-right:6px;">${labelNum}</span>`:'<span style="margin-left:14px;"></span>'}${label}</td>`;
+        return `<tr style="background:${bgColor};">${lbl}${cells}</tr>`;
+      };
+
+      const thCols   = rows.map(r => `<th style="min-width:58px;text-align:center;font-size:11px;font-weight:700;padding:5px 4px;background:var(--bg-secondary);">${r.semana}</th>`).join('');
+      const dateCols = rows.map(r => `<td style="text-align:center;font-size:10px;color:var(--text-muted);padding:3px 4px;white-space:nowrap;">${fmtDate(r.seg)}</td>`).join('');
+
+      const ps = rows.map((r,i) => edCell('prevSem', i, r.prevSem, r.mPrevSem, 'transparent')).join('');
+      const pa = rows.map((r,i) => edCell('prevAc',  i, r.prevAc,  r.mPrevAc,  'rgba(59,130,246,0.04)')).join('');
+      const rs = rows.map((r,i) => edCell('realSem', i, r.realSem, r.mRealSem, 'transparent')).join('');
+      const ra = rows.map((r,i) => edCell('realAc',  i, r.realAc,  r.mRealAc,  'rgba(22,163,74,0.06)')).join('');
+
+      const nManual = [ov.prevSem, ov.prevAc, ov.realSem, ov.realAc].reduce((s,o) => s + Object.keys(o).length, 0);
+
+      wrapper.innerHTML = `
+        <div style="display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--border-subtle); flex-wrap:wrap;">
+          <div style="font-size:13px; font-weight:600;">Linha de Base — Avanço Semanal</div>
+          ${nManual > 0 ? `<span style="font-size:11px; background:rgba(59,130,246,0.1); color:var(--primary-600); padding:2px 8px; border-radius:10px;">${nManual} edição(ões) manual(is)</span>` : ''}
+          <div style="flex:1;"></div>
+          ${nManual > 0 ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;" onclick="_plan_resetCurva()">🔄 Restaurar automático</button>` : ''}
+          <span style="font-size:11px; color:var(--text-muted);">✏️ Todas as células são editáveis</span>
+        </div>
+        <div style="overflow-x:auto;">
+          <table style="border-collapse:collapse; font-size:11px; width:max-content;">
+            <thead>
+              <tr>
+                <th style="min-width:150px;text-align:left;padding:6px 10px;position:sticky;left:0;z-index:3;background:var(--bg-secondary);border-right:2px solid var(--border-subtle);">SEMANA</th>
+                ${thCols}
+              </tr>
+              <tr>
+                <td style="font-size:10px;color:var(--text-muted);padding:3px 10px;position:sticky;left:0;z-index:2;background:var(--bg-secondary);border-right:2px solid var(--border-subtle);"></td>
+                ${dateCols}
+              </tr>
+            </thead>
+            <tbody>
+              ${mkRow('prevSem','1','Previsto Sem.','var(--bg-surface)',ps)}
+              ${mkRow('prevAc', '', 'Previsto Ac.', 'rgba(59,130,246,0.05)',pa)}
+              ${mkRow('realSem','2','Real Sem.',    'rgba(22,163,74,0.04)',rs)}
+              ${mkRow('realAc', '', 'Real Acum.',   'rgba(22,163,74,0.07)',ra)}
+            </tbody>
+          </table>
+        </div>`;
+
+      window._plan_saveCurvaCell = (rowKey, idx, cell) => {
+        cell.style.background = '';
+        const texto = cell.textContent.replace(',', '.').replace('%', '').trim();
+        const val = parseFloat(texto);
+        const sk = `curvaSAll_${_pid}`;
+        let saved = { prevSem:{}, prevAc:{}, realSem:{}, realAc:{} };
+        try { const s = localStorage.getItem(sk); if (s) saved = { ...saved, ...JSON.parse(s) }; } catch {}
+        if (!isNaN(val)) saved[rowKey][idx] = val; else delete saved[rowKey][idx];
+        localStorage.setItem(sk, JSON.stringify(saved));
+        _renderCurvaSTabela();
+      };
+      window._plan_resetCurva = () => {
+        if (!confirm('Restaurar todos os valores calculados automaticamente?\n\nIsso apagará todas as edições manuais.')) return;
+        localStorage.removeItem(`curvaSAll_${_pid}`);
+        _renderCurvaSTabela();
+      };
+
+    } catch(e) {
+      wrapper.innerHTML = '<div style="padding:16px; color:var(--error-500); font-size:13px;">Erro ao carregar linha de base.</div>';
+    }
   }
 
   // ── Relatório Executivo Semanal PDF ────────
@@ -2715,12 +3068,12 @@ const plan = (() => {
     const pesoTot2 = tarefasAtivas.reduce((s,t) => s + (t.peso||1), 0);
     const avancoReal = pesoTot2 > 0 ? tarefasAtivas.reduce((s,t) => s + (t.peso||1)*(t.progresso||0)/100, 0)/pesoTot2*100 : 0;
 
-    // Current week S+0 and next week S+1
+    // Convenção: S+1=semana atual, S+0=semana anterior, S+2=próxima
     const hoje = new Date(); hoje.setHours(0,0,0,0);
     const _getMon = off => { const d = new Date(hoje); d.setDate(d.getDate() - d.getDay() + 1 + off*7); return d; };
     const _getSun = off => { const d = _getMon(off); d.setDate(d.getDate()+6); return d; };
-    const [s0Mon, s0Sun] = [_getMon(0), _getSun(0)];
-    const [s1Mon, s1Sun] = [_getMon(1), _getSun(1)];
+    const [s0Mon, s0Sun] = [_getMon(-1), _getSun(-1)]; // S+0 = semana anterior
+    const [s1Mon, s1Sun] = [_getMon(0),  _getSun(0)];  // S+1 = semana atual
     const _semNom = (mon, sun) => {
       const fmt = d => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
       return `${fmt(mon)} a ${fmt(sun)}`;
@@ -2835,16 +3188,16 @@ const plan = (() => {
           </table>
         </div>
 
-        <!-- Atividades S+0 -->
+        <!-- Atividades S+1 (semana atual) -->
         <div style="margin-bottom:14px; border:1px solid #e5e7eb; border-radius:6px; padding:12px;">
-          <div style="font-weight:700; font-size:13px; margin-bottom:8px; color:#1e3a5f;">✅ ATIVIDADES PROGRAMADAS — S+0 (${_semNom(s0Mon,s0Sun)})</div>
-          <ul style="margin:0; padding-left:18px; line-height:1.7;">${_listaAtiv(ativS0)}</ul>
+          <div style="font-weight:700; font-size:13px; margin-bottom:8px; color:#1e3a5f;">✅ ATIVIDADES PROGRAMADAS — S+1 — Semana Atual (${_semNom(s1Mon,s1Sun)})</div>
+          <ul style="margin:0; padding-left:18px; line-height:1.7;">${_listaAtiv(ativS1)}</ul>
         </div>
 
-        <!-- Atividades S+1 -->
+        <!-- Atividades S+0 (semana anterior) -->
         <div style="margin-bottom:14px; border:1px solid #e5e7eb; border-radius:6px; padding:12px;">
-          <div style="font-weight:700; font-size:13px; margin-bottom:8px; color:#1e3a5f;">📅 ATIVIDADES PROGRAMADAS — S+1 (${_semNom(s1Mon,s1Sun)})</div>
-          <ul style="margin:0; padding-left:18px; line-height:1.7;">${_listaAtiv(ativS1)}</ul>
+          <div style="font-weight:700; font-size:13px; margin-bottom:8px; color:#1e3a5f;">📋 ATIVIDADES REALIZADAS — S+0 — Semana Anterior (${_semNom(s0Mon,s0Sun)})</div>
+          <ul style="margin:0; padding-left:18px; line-height:1.7;">${_listaAtiv(ativS0)}</ul>
         </div>
 
         <!-- Desvios e Plano de Ação -->
@@ -2895,10 +3248,224 @@ const plan = (() => {
     setTimeout(() => { printArea.style.display = 'none'; content.innerHTML = ''; }, 1500);
   };
 
+  // ── PTe OBRA ──────────────────────────────────────────────────────────────
+
+  // Armazena todos os registros carregados para o filtro de busca
+  let _pteObraRegs = [];
+
+  async function pteObraCarregarRegistros() {
+    const container = document.getElementById('pteObraTabela');
+    if (!container) return;
+    try {
+      const data = await apiCall('/api/pte-obra/registros');
+      _pteObraRegs = data.registros || [];
+      _pteObraRenderTabela();
+    } catch(err) {
+      document.getElementById('pteObraTabela').innerHTML =
+        `<div class="empty-state" style="padding:30px;"><div class="empty-state-title">Erro ao carregar</div><div class="empty-state-desc">${err.message}</div></div>`;
+    }
+  }
+
+  function _pteObraRenderTabela(filtro) {
+    const container = document.getElementById('pteObraTabela');
+    if (!container) return;
+
+    const termo = (filtro || document.getElementById('pteObraBusca')?.value || '').toLowerCase().trim();
+    const regs = termo
+      ? _pteObraRegs.filter(r => {
+          const arqs = (() => { try { return JSON.parse(r.arquivos_processados||'[]'); } catch(e){ return []; } })();
+          const txt = [r.id_pte, r.id_atividade, r.relacao_atividades, r.descricao_completa, r.hora_inicio, r.hora_fim, r.data_referencia, ...arqs].join(' ').toLowerCase();
+          return txt.includes(termo);
+        })
+      : _pteObraRegs;
+
+    if (!_pteObraRegs.length) {
+      container.innerHTML = `<div class="empty-state" style="padding:40px;"><div class="empty-state-icon">📋</div><div class="empty-state-title">Nenhum registro ainda</div><div class="empty-state-desc">Confirme uma leitura de PTe na tela de Efetivo para gerar registros aqui.</div></div>`;
+      return;
+    }
+
+    const _cell = (rid, campo, val, multiline) => {
+      const tag = multiline ? 'div' : 'span';
+      const style = multiline
+        ? `display:block;width:100%;min-height:36px;padding:3px 6px;border-radius:4px;border:1px solid transparent;font-size:.81rem;cursor:text;white-space:pre-wrap;line-height:1.4;`
+        : `display:inline-block;min-width:130px;padding:3px 6px;border-radius:4px;border:1px solid transparent;font-size:.82rem;cursor:text;`;
+      return `<${tag}
+        contenteditable="true"
+        style="${style}"
+        onfocus="this.style.borderColor='var(--primary-400)';this.style.background='var(--bg-primary)'"
+        onblur="plan.pteObraSalvarCelula(this,${rid},'${campo}')"
+        onkeydown="${multiline ? '' : `if(event.key==='Enter'){event.preventDefault();this.blur()}`}"
+        >${escapeHtml(val||'')}</${tag}>`;
+    };
+
+    const rows = regs.map(r => {
+      const arqs = (() => { try { return JSON.parse(r.arquivos_processados||'[]'); } catch(e){ return []; } })();
+      const arqStr = arqs.join('\n');
+      const dataLabel = r.data_referencia ? r.data_referencia.split('-').reverse().join('/') : '';
+      return `<tr style="border-bottom:1px solid var(--border-subtle); vertical-align:top;">
+        <td style="padding:8px 10px;min-width:160px;">
+          ${_cell(r.id,'arquivos_processados_str',arqStr,true)}
+          <span style="font-size:.74rem;color:var(--text-muted);display:block;margin-top:2px;">${escapeHtml(dataLabel)}</span>
+        </td>
+        <td style="padding:8px 10px;min-width:150px;">${_cell(r.id,'hora_inicio',r.hora_inicio,false)}</td>
+        <td style="padding:8px 10px;min-width:150px;">${_cell(r.id,'hora_fim',r.hora_fim,false)}</td>
+        <td style="padding:8px 10px;min-width:220px;">
+          ${_cell(r.id,'relacao_atividades',r.relacao_atividades,false)}
+          ${_cell(r.id,'descricao_completa',r.descricao_completa,true)}
+        </td>
+        <td style="padding:8px 10px;white-space:nowrap;text-align:right;">
+          <button class="btn btn-secondary btn-sm" style="font-size:.75rem;margin-bottom:4px;display:block;width:100%;" onclick="plan.pteObraVerDetalhes(${r.id})">Ver Colaboradores</button>
+          <button class="btn btn-danger btn-sm" style="font-size:.75rem;display:block;width:100%;" onclick="plan.pteObraDeletar(${r.id})">Excluir</button>
+        </td>
+      </tr>`;
+    }).join('');
+
+    const emptyMsg = !regs.length && termo
+      ? `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-muted);">Nenhum resultado para "${escapeHtml(termo)}"</td></tr>`
+      : '';
+
+    container.innerHTML = `
+      <div style="padding:12px 10px 8px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;gap:8px;">
+        <div class="search-wrapper" style="flex:1;max-width:380px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input id="pteObraBusca" class="input" type="text" placeholder="Buscar por arquivo, CPF, descrição..." value="${escapeHtml(termo)}"
+            oninput="plan._pteObraRenderTabela()"
+            style="padding-left:28px;font-size:.83rem;">
+        </div>
+        <span style="font-size:.8rem;color:var(--text-muted);">${regs.length} de ${_pteObraRegs.length} registros</span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead><tr style="border-bottom:2px solid var(--border);background:var(--bg-secondary);">
+            <th style="padding:8px 10px;text-align:left;font-size:.79rem;color:var(--text-muted);">Arquivo / Data ✎</th>
+            <th style="padding:8px 10px;text-align:left;font-size:.79rem;color:var(--text-muted);">Início ✎</th>
+            <th style="padding:8px 10px;text-align:left;font-size:.79rem;color:var(--text-muted);">Fim ✎</th>
+            <th style="padding:8px 10px;text-align:left;font-size:.79rem;color:var(--text-muted);">Registro / Descrição ✎</th>
+            <th style="padding:8px 10px;"></th>
+          </tr></thead>
+          <tbody>${rows}${emptyMsg}</tbody>
+        </table>
+      </div>`;
+  }
+
+  async function pteObraSalvarCelula(el, rid, campo) {
+    el.style.borderColor = 'transparent';
+    el.style.background = '';
+    const val = el.textContent.trim() === '—' ? '' : el.textContent.trim();
+    try {
+      await apiCall(`/api/pte-obra/registros/${rid}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [campo]: val })
+      });
+      showToast('Salvo', 'success', 1200);
+    } catch(err) {
+      showToast('Erro ao salvar: ' + err.message, 'error');
+    }
+  }
+
+  async function pteObraVerDetalhes(rid) {
+    let det;
+    try {
+      det = await apiCall(`/api/pte-obra/registros/${rid}/detalhes`);
+    } catch(err) {
+      showToast('Erro: ' + err.message, 'error'); return;
+    }
+
+    const colabs = det.colaboradores || [];
+    const pdfs   = det.pdfs || [];
+    const procId = det.processamento_id;
+
+    const modColabs = colabs.filter(c => c.categoria !== 'MOI');
+    const moiColabs = colabs.filter(c => c.categoria === 'MOI');
+    const cpfsMod   = modColabs.map(c => c.cpf).filter(Boolean);
+    const cpfsMoi   = moiColabs.map(c => c.cpf).filter(Boolean);
+
+    window._pteDetCopiarMod = () => {
+      if (!cpfsMod.length) { showToast('Nenhum CPF MOD disponível', 'warning'); return; }
+      navigator.clipboard.writeText(cpfsMod.join('\n'))
+        .then(() => showToast(`${cpfsMod.length} CPFs MOD copiados!`, 'success'))
+        .catch(() => showToast('Erro ao copiar', 'error'));
+    };
+    window._pteDetCopiarMoi = () => {
+      if (!cpfsMoi.length) { showToast('Nenhum CPF MOI disponível', 'warning'); return; }
+      navigator.clipboard.writeText(cpfsMoi.join('\n'))
+        .then(() => showToast(`${cpfsMoi.length} CPFs MOI copiados!`, 'success'))
+        .catch(() => showToast('Erro ao copiar', 'error'));
+    };
+
+    const _grupo = (titulo, lista, cpfKey, onCopiar) => {
+      if (!lista.length) return '';
+      const rows = lista.map((c, i) => `
+        <tr>
+          <td style="color:var(--text-muted);font-size:12px;">${i + 1}</td>
+          <td style="font-weight:600;">${escapeHtml(c.nome || '')}</td>
+          <td><span style="font-family:'JetBrains Mono',monospace;font-size:12px;">${escapeHtml(c.cpf || '—')}</span></td>
+          <td style="font-size:13px;">${escapeHtml(c.cargo || '—')}</td>
+          <td><span class="badge badge-${c.categoria === 'MOI' ? 'blue' : 'success'}">${escapeHtml(c.categoria || 'MOD')}</span></td>
+        </tr>`).join('');
+      return `
+        <div style="margin-bottom:20px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding:0 4px;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-weight:700;font-size:14px;">${titulo}</span>
+              <span class="badge badge-info">${lista.length} pessoas</span>
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick="${onCopiar}()" title="Copiar CPFs">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copiar CPFs
+            </button>
+          </div>
+          <div class="table-wrapper">
+            <table class="table">
+              <thead>
+                <tr><th>#</th><th>Nome</th><th>CPF</th><th>Cargo</th><th>Cat.</th></tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>`;
+    };
+
+    const pdfLinks = pdfs.length ? pdfs.map(fn =>
+      `<a href="/api/rdo/historico/${procId}/pdf/${encodeURIComponent(fn)}" target="_blank"
+          style="display:inline-flex;align-items:center;gap:5px;font-size:.82rem;color:var(--primary-500);padding:3px 0;text-decoration:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        ${escapeHtml(fn)}
+      </a>`).join('<br>') : '';
+
+    showModal('Detalhes PTe — Colaboradores e PDFs', `
+      <div style="width:min(92vw,860px);display:flex;flex-direction:column;gap:16px;">
+
+        ${pdfs.length ? `
+        <div>
+          <div style="font-weight:600;font-size:.9rem;margin-bottom:6px;">📎 PDFs utilizados</div>
+          <div style="background:var(--bg-secondary);border-radius:6px;padding:10px 14px;line-height:1.8;">${pdfLinks}</div>
+        </div>` : ''}
+
+        ${_grupo('MOD — Mão de Obra Direta', modColabs, 'cpf', '_pteDetCopiarMod')}
+        ${_grupo('MOI — Mão de Obra Indireta', moiColabs, 'cpf', '_pteDetCopiarMoi')}
+
+        ${!colabs.length ? `<div style="text-align:center;padding:24px;color:var(--text-muted);">Nenhum colaborador registrado neste PTe.</div>` : ''}
+      </div>`);
+  }
+
+  async function pteObraDeletar(id) {
+    if (!confirm('Excluir este registro PTe?')) return;
+    try {
+      const res = await apiCall(`/api/pte-obra/registros/${id}`, { method: 'DELETE' });
+      if (res.success) { showToast('Registro excluído', 'success'); pteObraCarregarRegistros(); }
+      else showToast(res.error || 'Erro', 'error');
+    } catch(err) {
+      showToast('Erro: ' + err.message, 'error');
+    }
+  }
+
   return { init, secao, tab, filtrar, selecionarProjeto, novoProjetoModal, importarModal, exportar,
            salvarProgresso, salvarCampo, adicionarTarefa, recalcular, salvarEditor, deletarProjeto,
-           relatorio, relatorioExecutivo, carregarCurvaSTable: _carregarCurvaSTable,
-           carregarRelatorioExecutivoInline };
+           relatorio, relatorioExecutivo, calculadoraHoras, setCurvaSType,
+           carregarCurvaSTable: _carregarCurvaSTable, carregarRelatorioExecutivoInline,
+           pteObraCarregarRegistros, pteObraSalvarCelula, pteObraVerDetalhes, pteObraDeletar };
 })();
 
 
@@ -3107,14 +3674,16 @@ const cad = (() => {
       if (countEl) countEl.textContent = `${d.total || items.length} colaboradores cadastrados`;
       if (!items.length) { el.innerHTML = '<div class="empty-state" style="padding:32px;"><div class="empty-state-icon">👷</div><div class="empty-state-title">Nenhum colaborador cadastrado</div></div>'; return; }
       el.innerHTML = `<div class="table-wrapper"><table class="table">
-        <thead><tr><th>Nome</th><th>CPF</th><th>Matrícula</th><th>Cargo</th><th>Categoria</th><th>Empresa</th></tr></thead>
+        <thead><tr><th>Nome</th><th>CPF</th><th>Matrícula</th><th>Cargo</th><th>Setor</th><th>Categoria</th><th>Empresa</th><th></th></tr></thead>
         <tbody>${items.map(c => `<tr>
           <td style="font-weight:600;">${escapeHtml(c.nome)}</td>
           <td style="font-family:'JetBrains Mono'; font-size:12px;">${c.cpf ? formatCpf(c.cpf) : '—'}</td>
           <td style="font-family:'JetBrains Mono'; font-size:12px;">${escapeHtml(c.matricula||'—')}</td>
           <td style="font-size:12px;">${escapeHtml(c.cargo||'—')}</td>
+          <td style="font-size:12px;">${escapeHtml(c.setor||'—')}</td>
           <td><span class="badge badge-${c.categoria==='MOD'?'success':'blue'}">${escapeHtml(c.categoria||'—')}</span></td>
           <td style="font-size:12px;">${escapeHtml(c.empresa||'—')}</td>
+          <td><button class="btn btn-ghost btn-sm" onclick='editarColaborador(${c.id}, ${JSON.stringify(c)})' title="Editar">✏️</button></td>
         </tr>`).join('')}</tbody></table></div>`;
     } catch(e) { el.innerHTML = `<p style="color:var(--error-500);padding:16px;">${escapeHtml(e.message)}</p>`; }
   }

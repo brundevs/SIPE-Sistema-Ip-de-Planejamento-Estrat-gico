@@ -2,19 +2,25 @@
 SIPE | Sistema Ipê de Planejamento Estratégico - Rotas da API Web (Flask)
 Endpoints para Efetivo, RDO e Clima.
 """
+import csv
+import io as _io
 import json
 import os
+import re as _re
+import shutil
+import time
+from datetime import date as _date, datetime, timedelta as _td, timezone
 from pathlib import Path
-from datetime import datetime, timezone
 
+import requests
 from flask import Blueprint, request, jsonify, current_app, send_from_directory
 from sqlalchemy import func
 from werkzeug.utils import secure_filename
 import openpyxl
 
-from app.database.models import Colaborador, Vinculo, ProcessamentoRDO, LogAtividade, HistoricoTerceiro, Projeto, Tarefa, Equipamento, Veiculo, HistoricoLiberacao, PermissaoTrabalho
+from app.database.models import Colaborador, Vinculo, ProcessamentoRDO, LogAtividade, HistoricoTerceiro, Projeto, Tarefa, Equipamento, Veiculo, HistoricoLiberacao, PermissaoTrabalho, PteObraRegistro
 from app.database.session import SessionLocal
-from app.core.pdf_extractor import extrair_texto_pdf, extrair_data_documento, extrair_colaboradores_pte, extrair_cpfs, extrair_horarios_pte, extrair_nomes_do_rdo, extrair_permissoes_trabalho
+from app.core.pdf_extractor import extrair_texto_pdf, extrair_data_documento, extrair_colaboradores_pte, extrair_cpfs, extrair_horarios_pte, extrair_nomes_do_rdo, extrair_permissoes_trabalho, extrair_dados_pte_obra
 from app.core.fuzzy_engine import processar_lista_nomes, buscar_melhor_match
 from app.services.clima_service import obter_clima
 from app.services.log_service import registrar_log
@@ -32,8 +38,6 @@ api = Blueprint("api", __name__, url_prefix="/api")
 # ─────────────────────────────────────────────
 # EFETIVO (Gestão de Colaboradores)
 # ─────────────────────────────────────────────
-
-import re as _re
 
 def _limpar_cpf(valor: str) -> str:
     """Remove tudo que não for dígito do CPF. Retorna string com 11 dígitos ou menos."""
@@ -233,7 +237,10 @@ def baixar_modelo_padrao():
     cabecalhos = [
         ("Nome Completo", 42),
         ("CPF",           22),
+        ("Matrícula",     18),
         ("Cargo",         30),
+        ("Setor",         25),
+        ("Empresa",       30),
         ("Categoria",     16),
     ]
 
@@ -247,9 +254,9 @@ def baixar_modelo_padrao():
     ws.row_dimensions[1].height = 24
 
     exemplos = [
-        ("Ana Paula Bastos",  "000.000.000-00",  "Auxiliar Administrativo", "MOI"),
-        ("Bruno Silva Lima",  "11122233344",     "Técnico Mecânico",        "MOD"),
-        ("Carla Souza Costa", "55566677788",     "Encarregado",             "MOD"),
+        ("Ana Paula Bastos",  "000.000.000-00", "1001", "Auxiliar Administrativo", "Administrativo", "Empresa A", "MOI"),
+        ("Bruno Silva Lima",  "11122233344",    "1002", "Técnico Mecânico",        "Manutenção",     "Empresa B", "MOD"),
+        ("Carla Souza Costa", "55566677788",    "1003", "Encarregado",             "Produção",       "Empresa B", "MOD"),
     ]
     fill_ex = PatternFill("solid", fgColor=verde_l)
     for r, linha in enumerate(exemplos, 2):
@@ -262,9 +269,9 @@ def baixar_modelo_padrao():
 
     ws.freeze_panes = "A2"
 
-    # Validação de lista para Categoria (coluna D)
+    # Validação de lista para Categoria (coluna G)
     dv = DataValidation(type="list", formula1='"MOD,MOI"', allow_blank=True)
-    dv.sqref = "D2:D10000"
+    dv.sqref = "G2:G10000"
     ws.add_data_validation(dv)
 
     # ── Aba Instruções ─────────────────────────────────────────
@@ -286,9 +293,12 @@ def baixar_modelo_padrao():
 
     instrucoes = [
         ("Campo",          "Descrição / Regras"),
-        ("Nome Completo",  "Nome sem abreviações. O sistema normaliza para Title Case: 'BRUNO BASTOS' vira 'Bruno Bastos'."),
+        ("Nome Completo",  "Obrigatório. Nome sem abreviações. O sistema normaliza para Title Case: 'BRUNO BASTOS' → 'Bruno Bastos'."),
         ("CPF",            "Aceita com ou sem máscara. O sistema remove pontos/traços e valida 11 dígitos."),
+        ("Matrícula",      "Código interno / RE / chapa do colaborador. Opcional."),
         ("Cargo",          "Nomenclatura oficial. O sistema normalizará as maiúsculas automaticamente."),
+        ("Setor",          "Setor ou departamento do colaborador. Opcional."),
+        ("Empresa",        "Empresa à qual o colaborador pertence. Opcional."),
         ("Categoria",      "\"MOD\" (Mão de Obra Direta) ou \"MOI\" (Mão de Obra Indireta). Outros valores são descartados com aviso."),
     ]
     for r, (campo, desc) in enumerate(instrucoes, 3):
@@ -353,7 +363,7 @@ def remover_colaborador(colab_id):
     """Remove (desativa) um colaborador."""
     db = SessionLocal()
     try:
-        colab = db.query(Colaborador).get(colab_id)
+        colab = db.query(Colaborador).filter(Colaborador.id == colab_id).first()
         if not colab:
             return jsonify({"error": "Colaborador não encontrado"}), 404
         colab.ativo = False
@@ -400,6 +410,9 @@ def adicionar_colaborador():
         empresa = str(dados.get("empresa", "") or "").strip() or None
         cargo_raw = str(dados.get("cargo", "") or "").strip()
         cargo = cargo_raw.title() if cargo_raw else None
+        matricula = str(dados.get("matricula", "") or "").strip() or None
+        setor = str(dados.get("setor", "") or "").strip() or None
+        categoria = _normalizar_categoria(dados.get("categoria", ""))
 
         # Verifica duplicidade por CPF ou nome
         existente = None
@@ -415,12 +428,15 @@ def adicionar_colaborador():
             if cpf: existente.cpf = cpf
             if empresa: existente.empresa = empresa
             if cargo: existente.cargo = cargo
+            if matricula: existente.matricula = matricula
+            if setor: existente.setor = setor
+            if categoria: existente.categoria = categoria
             existente.data_atualizacao = datetime.now(timezone.utc)
             db.commit()
             registrar_log(db, "info", "efetivo", f"Colaborador atualizado manualmente: {nome}")
             return jsonify({"success": True, "acao": "atualizado", "id": existente.id})
         else:
-            novo = Colaborador(nome=nome, cpf=cpf, empresa=empresa, cargo=cargo)
+            novo = Colaborador(nome=nome, cpf=cpf, empresa=empresa, cargo=cargo, matricula=matricula, setor=setor, categoria=categoria)
             db.add(novo)
             db.commit()
             registrar_log(db, "success", "efetivo", f"Colaborador adicionado manualmente: {nome}")
@@ -640,7 +656,7 @@ def historico_liberacoes():
 def deletar_liberacao(lid):
     db = SessionLocal()
     try:
-        item = db.query(HistoricoLiberacao).get(lid)
+        item = db.query(HistoricoLiberacao).filter(HistoricoLiberacao.id == lid).first()
         if not item:
             return jsonify({"error": "Não encontrado"}), 404
         db.delete(item)
@@ -869,17 +885,62 @@ def deletar_processamento(proc_id):
         db.close()
 
 
+@api.route("/efetivo/colaboradores/<int:colab_id>", methods=["PUT"])
+def editar_colaborador(colab_id):
+    """Edita todos os campos de um colaborador."""
+    db = SessionLocal()
+    try:
+        colab = db.query(Colaborador).filter(Colaborador.id == colab_id, Colaborador.ativo == True).first()
+        if not colab:
+            return jsonify({"error": "Colaborador não encontrado"}), 404
+
+        dados = request.get_json(force=True) or {}
+
+        nome = _normalizar_nome(dados.get("nome", colab.nome))
+        if not nome:
+            return jsonify({"error": "Nome é obrigatório"}), 400
+
+        cpf_raw = dados.get("cpf", "")
+        cpf = _limpar_cpf(cpf_raw) if cpf_raw else None
+        if cpf and len(cpf) != 11:
+            return jsonify({"error": "CPF deve ter 11 dígitos"}), 400
+
+        matricula = str(dados.get("matricula", "") or "").strip() or None
+        cargo = str(dados.get("cargo", "") or "").strip().title() or None
+        setor = str(dados.get("setor", "") or "").strip() or None
+        empresa = str(dados.get("empresa", "") or "").strip() or None
+        categoria = _normalizar_categoria(dados.get("categoria", ""))
+
+        colab.nome = nome
+        if cpf is not None: colab.cpf = cpf
+        if matricula is not None: colab.matricula = matricula
+        if cargo is not None: colab.cargo = cargo
+        if setor is not None: colab.setor = setor
+        if empresa is not None: colab.empresa = empresa
+        if categoria: colab.categoria = categoria
+        colab.data_atualizacao = datetime.now(timezone.utc)
+
+        db.commit()
+        registrar_log(db, "info", "efetivo", f"Colaborador editado: {nome}")
+        return jsonify({"success": True})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
 @api.route("/efetivo/colaboradores/<int:colab_id>/categoria", methods=["PUT"])
 def atualizar_categoria(colab_id):
     """Atualiza a categoria (MOD/MOI) de um colaborador."""
-    data = request.get_json()
+    data = request.get_json() or {}
     nova_categoria = data.get("categoria", "").strip().upper()
     if nova_categoria not in ["MOD", "MOI"]:
         return jsonify({"error": "Categoria inválida. Use MOD ou MOI."}), 400
 
     db = SessionLocal()
     try:
-        colab = db.query(Colaborador).get(colab_id)
+        colab = db.query(Colaborador).filter(Colaborador.id == colab_id).first()
         if not colab or not colab.ativo:
             return jsonify({"error": "Colaborador não encontrado"}), 404
         
@@ -1047,11 +1108,9 @@ def processar_pte():
                 lista_final.sort(key=lambda x: x['nome'])
 
                 # Mover PDF para armazenamento permanente
-                import shutil
                 pdf_filename = None
                 try:
-                    import time as _time
-                    safe_name = f"{int(_time.time()*1000)}_{filename}"
+                    safe_name = f"{int(time.time()*1000)}_{filename}"
                     dest = PDFS_DIR / safe_name
                     shutil.move(str(filepath), str(dest))
                     pdf_filename = safe_name
@@ -1064,6 +1123,9 @@ def processar_pte():
                 # 5. Extrair Permissões de Trabalho do PDF
                 permissoes_pt = extrair_permissoes_trabalho(texto)
 
+                # 6. Extrair dados PTe Obra (ID Atividade, ID PTe, Descrição)
+                pte_obra = extrair_dados_pte_obra(texto)
+
                 resultados.append({
                     "arquivo": file.filename,
                     "data": data_doc,
@@ -1073,6 +1135,7 @@ def processar_pte():
                     "colaboradores": lista_final,
                     "pdf_filename": pdf_filename,
                     "permissoes": permissoes_pt,
+                    "pte_obra": pte_obra,
                 })
 
             except Exception as e:
@@ -1114,6 +1177,7 @@ def confirmar_pte():
     resultados = data["resultados"]
     pdfs = data.get("pdfs", [])
     permissoes_input = data.get("permissoes", [])
+    pte_obra_list = data.get("pte_obra", [])  # lista de dicts com id_atividade, id_pte, descricao
 
     def _parse_dt_pte(s):
         """Parse 'DD/MM/YYYY H:MM:SS' or 'DD/MM/YYYY HH:MM:SS'."""
@@ -1157,7 +1221,6 @@ def confirmar_pte():
 
     ds = ", ".join(sorted(datas_encontradas)) if datas_encontradas else "Sem Data"
 
-    import json as _json
     db = SessionLocal()
     try:
         ini_h = start_min.strftime('%H:%M') if start_min else None
@@ -1169,8 +1232,8 @@ def confirmar_pte():
             total_matches_auto=total,
             total_matches_revisao=0,
             total_sem_match=0,
-            resultado_json=_json.dumps(resultados, ensure_ascii=False),
-            pdfs_json=_json.dumps(pdfs, ensure_ascii=False) if pdfs else None,
+            resultado_json=json.dumps(resultados, ensure_ascii=False),
+            pdfs_json=json.dumps(pdfs, ensure_ascii=False) if pdfs else None,
             inicio_horario=ini_h,
             fim_horario=fim_h,
         )
@@ -1210,6 +1273,52 @@ def confirmar_pte():
                 db.add(pt_rec)
         db.commit()
 
+        # Salvar registro PTe Obra (Planejamento de Obras > Histórico PTe)
+        def _parse_dt_obra(s):
+            if not s: return None
+            s = s.strip()
+            parts = s.split(' ')
+            if len(parts) == 2:
+                h, m, sec = parts[1].split(':')
+                s = f"{parts[0]} {h.zfill(2)}:{m}:{sec}"
+            try: return datetime.strptime(s, "%d/%m/%Y %H:%M:%S")
+            except Exception: return None
+
+        if pte_obra_list:
+            id_atividade = next((p.get("id_atividade","") for p in pte_obra_list if p.get("id_atividade")), "")
+            id_pte_val   = next((p.get("id_pte","") for p in pte_obra_list if p.get("id_pte")), "")
+            descricao    = next((p.get("descricao","") for p in pte_obra_list if p.get("descricao")), "")
+            relacao = f"PT - {id_atividade} - {descricao[:80]}" if (id_atividade or descricao) else ""
+            arq_nomes = [p.get("arquivo","") for p in pte_obra_list if p.get("arquivo")]
+
+            # Início mais cedo: prioriza start_min (consolidado do confirmar), fallback pte_obra_list
+            ini_obra = start_min
+            if not ini_obra:
+                for p in pte_obra_list:
+                    dt = _parse_dt_obra(p.get("hora_inicio",""))
+                    if dt and (ini_obra is None or dt < ini_obra): ini_obra = dt
+
+            # Fim mais tarde: prioriza end_max, fallback pte_obra_list
+            fim_obra = end_max
+            if not fim_obra:
+                for p in pte_obra_list:
+                    dt = _parse_dt_obra(p.get("hora_fim",""))
+                    if dt and (fim_obra is None or dt > fim_obra): fim_obra = dt
+
+            reg = PteObraRegistro(
+                processamento_id=proc.id,
+                id_pte=id_pte_val,
+                id_atividade=id_atividade,
+                data_referencia=ini_obra.strftime("%Y-%m-%d") if ini_obra else (data_doc_iso or ""),
+                hora_inicio=ini_obra.strftime("%d/%m/%Y %H:%M:%S") if ini_obra else "",
+                hora_fim=fim_obra.strftime("%d/%m/%Y %H:%M:%S") if fim_obra else "",
+                relacao_atividades=relacao,
+                descricao_completa=descricao,
+                arquivos_processados=json.dumps(arq_nomes if arq_nomes else pdfs, ensure_ascii=False),
+            )
+            db.add(reg)
+            db.commit()
+
         registrar_log(db, "success", "pte", f"Confirmação de PTE: {total} colaboradores salvos no histórico.")
 
         return jsonify({"success": True})
@@ -1224,8 +1333,7 @@ def confirmar_pte():
 def download_pdf(proc_id, filename):
     """Serve um PDF armazenado vinculado a um processamento."""
     # Sanitize filename to prevent path traversal
-    import re as _re2
-    if not _re2.match(r'^[\w\-\.]+\.pdf$', filename, _re2.IGNORECASE):
+    if not _re.match(r'^[\w\-\.]+\.pdf$', filename, _re.IGNORECASE):
         return jsonify({"error": "Nome de arquivo inválido"}), 400
 
     db = SessionLocal()
@@ -1257,18 +1365,13 @@ def download_pdf(proc_id, filename):
 
 def _obter_clima_data_especifica(data_iso: str) -> dict:
     """Obtém dados climáticos reais para uma data específica via Open-Meteo."""
-    import requests as _rq
-    from datetime import date as _dt_date
-
-    conf = ler_clima_config() if False else {}
-    # Tenta ler config; se falhar usa coordenadas padrão
+    # Lê configuração de localização sem depender do app context
+    conf = {}
     try:
-        from pathlib import Path as _Path
-        import json as _js
-        cfg_path = _Path(__file__).resolve().parent.parent.parent / 'data' / 'clima_settings.json'
+        cfg_path = Path(__file__).resolve().parent.parent.parent / 'data' / 'clima_settings.json'
         if cfg_path.exists():
             with open(cfg_path, 'r', encoding='utf-8') as _f:
-                conf = _js.load(_f)
+                conf = json.load(_f)
     except Exception:
         pass
 
@@ -1276,8 +1379,8 @@ def _obter_clima_data_especifica(data_iso: str) -> dict:
     lon = conf.get('lon', -40.2925)
 
     try:
-        today = _dt_date.today()
-        target = _dt_date.fromisoformat(data_iso)
+        today = _date.today()
+        target = _date.fromisoformat(data_iso)
         days_ago = (today - target).days
 
         if days_ago > 5:
@@ -1285,7 +1388,7 @@ def _obter_clima_data_especifica(data_iso: str) -> dict:
         else:
             url = "https://api.open-meteo.com/v1/forecast"
 
-        resp = _rq.get(url, params={
+        resp = requests.get(url, params={
             "latitude": lat, "longitude": lon,
             "start_date": data_iso, "end_date": data_iso,
             "hourly": "weathercode,precipitation",
@@ -1345,9 +1448,8 @@ def rdo_obra_dados():
     if not data_iso:
         return jsonify({"error": "Parâmetro 'data' obrigatório (YYYY-MM-DD)"}), 400
 
-    from datetime import date as _dt_d
     try:
-        data_obj = _dt_d.fromisoformat(data_iso)
+        data_obj = _date.fromisoformat(data_iso)
     except ValueError:
         return jsonify({"error": "Data inválida"}), 400
 
@@ -1560,11 +1662,6 @@ def dashboard_stats():
 # PLANEJAMENTO DE OBRAS (Project Mirror)
 # ─────────────────────────────────────────────
 
-import re as _re2
-import csv
-import io as _io
-from datetime import date as _date, timedelta as _td
-
 _MESES_BR = {
     'jan':1,'fev':2,'mar':3,'abr':4,'mai':5,'jun':6,
     'jul':7,'ago':8,'set':9,'out':10,'nov':11,'dez':12,
@@ -1572,16 +1669,16 @@ _MESES_BR = {
     'junho':6,'julho':7,'agosto':8,'setembro':9,'outubro':10,'novembro':11,'dezembro':12,
 }
 
-_TIME_SUFFIX = _re2.compile(r'\s+\d{1,2}:\d{2}(?::\d{2})?$')
+_TIME_SUFFIX = _re.compile(r'\s+\d{1,2}:\d{2}(?::\d{2})?$')
 
 def _parse_data_br(val):
     if not val: return None
     s = _TIME_SUFFIX.sub('', str(val).strip())   # remove " 09:00" ou " 09:00:00"
     if not s or s in ('-','NA','N/A','#','0'): return None
-    if _re2.match(r'\d{4}-\d{2}-\d{2}', s): return s[:10]
-    m = _re2.match(r'^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})$', s)
+    if _re.match(r'\d{4}-\d{2}-\d{2}', s): return s[:10]
+    m = _re.match(r'^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})$', s)
     if m: return f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
-    m = _re2.match(r'^(\d{1,2})[\s/\-]+(\w+)[\s/\-]+(\d{4})$', s, _re2.I)
+    m = _re.match(r'^(\d{1,2})[\s/\-]+(\w+)[\s/\-]+(\d{4})$', s, _re.I)
     if m:
         mes = _MESES_BR.get(m.group(2).lower().replace('ç','c').replace('é','e').replace('ê','e').replace('ã','a'))
         if mes: return f"{m.group(3)}-{mes:02d}-{int(m.group(1)):02d}"
@@ -1595,7 +1692,7 @@ def _parse_pct(val):
 
 def _parse_int(val):
     if not val: return 0
-    m = _re2.match(r'(\d+)', str(val).strip())
+    m = _re.match(r'(\d+)', str(val).strip())
     return int(m.group(1)) if m else 0
 
 def _calcular_critico(tarefas):
@@ -1657,15 +1754,23 @@ def criar_projeto():
 def detalhe_projeto(pid):
     db = SessionLocal()
     try:
-        p = db.query(Projeto).get(pid)
+        p = db.query(Projeto).filter(Projeto.id == pid).first()
         if not p: return jsonify({"error":"Projeto não encontrado"}), 404
-        criticos = _calcular_critico(p.tarefas)
+        try:
+            criticos = _calcular_critico(p.tarefas)
+        except Exception:
+            criticos = set()
         tarefas = []
         for t in p.tarefas:
-            d = t.to_dict()
-            d["is_critico"] = t.id in criticos
-            tarefas.append(d)
+            try:
+                d = t.to_dict()
+                d["is_critico"] = t.id in criticos
+                tarefas.append(d)
+            except Exception:
+                pass
         return jsonify({"projeto": p.to_dict(), "tarefas": tarefas})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     finally:
         db.close()
 
@@ -1674,10 +1779,12 @@ def detalhe_projeto(pid):
 def deletar_projeto(pid):
     db = SessionLocal()
     try:
-        p = db.query(Projeto).get(pid)
+        p = db.query(Projeto).filter(Projeto.id == pid).first()
         if not p: return jsonify({"error":"Não encontrado"}), 404
         db.delete(p); db.commit()
         return jsonify({"success": True})
+    except Exception as e:
+        db.rollback(); return jsonify({"error": str(e)}), 500
     finally:
         db.close()
 
@@ -1686,7 +1793,7 @@ def deletar_projeto(pid):
 def importar_cronograma(pid):
     db = SessionLocal()
     try:
-        p = db.query(Projeto).get(pid)
+        p = db.query(Projeto).filter(Projeto.id == pid).first()
         if not p: return jsonify({"error":"Projeto não encontrado"}), 404
 
         if "file" not in request.files:
@@ -1751,8 +1858,8 @@ def importar_cronograma(pid):
             # Limpa sufixos MS Project: "2II", "20TI+3d", "43II+11d" → extrai só o número
             pred_list = []
             if predecessoras and predecessoras.strip():
-                for item in _re2.split(r'[,;]', predecessoras):
-                    m_pred = _re2.match(r'(\d+)', item.strip())
+                for item in _re.split(r'[,;]', predecessoras):
+                    m_pred = _re.match(r'(\d+)', item.strip())
                     if m_pred: pred_list.append(m_pred.group(1))
             mo = _parse_int(col(row,'mao de obra','mo ','m.o','recurso mo','h.h','hh'))
             eq = _parse_int(col(row,'equipamento','equip','maquina'))
@@ -1799,7 +1906,7 @@ def importar_cronograma(pid):
 def atualizar_tarefa(tid):
     db = SessionLocal()
     try:
-        t = db.query(Tarefa).get(tid)
+        t = db.query(Tarefa).filter(Tarefa.id == tid).first()
         if not t: return jsonify({"error":"Não encontrada"}), 404
         d = request.get_json(force=True) or {}
         for campo in ('progresso','inicio_real','fim_real','inicio_previsto','fim_previsto','recursos_mo','recursos_eq'):
@@ -1819,7 +1926,7 @@ def atualizar_tarefa(tid):
 def curva_s(pid):
     db = SessionLocal()
     try:
-        p = db.query(Projeto).get(pid)
+        p = db.query(Projeto).filter(Projeto.id == pid).first()
         if not p: return jsonify({"error":"Não encontrado"}), 404
         tarefas = [t for t in p.tarefas if t.inicio_previsto and t.fim_previsto]
         if not tarefas: return jsonify({"labels":[], "previsto":[], "real":[]})
@@ -1863,7 +1970,7 @@ def curva_s_semanal(pid):
     """Retorna breakdown semanal da Curva S: Semana, Período, Previsto Sem%, Previsto Ac%, Real Sem%, Real Ac%, Desvio Ac%."""
     db = SessionLocal()
     try:
-        p = db.query(Projeto).get(pid)
+        p = db.query(Projeto).filter(Projeto.id == pid).first()
         if not p:
             return jsonify({"error": "Não encontrado"}), 404
         tarefas = [t for t in p.tarefas if t.inicio_previsto and t.fim_previsto]
@@ -1944,7 +2051,7 @@ def curva_s_semanal(pid):
 def histograma(pid):
     db = SessionLocal()
     try:
-        p = db.query(Projeto).get(pid)
+        p = db.query(Projeto).filter(Projeto.id == pid).first()
         if not p: return jsonify({"error":"Não encontrado"}), 404
         tarefas = [t for t in p.tarefas if t.inicio_previsto and t.fim_previsto and t.nivel >= 1]
         if not tarefas: return jsonify({"labels":[], "mo_prev":[], "mo_real":[], "eq_prev":[], "eq_real":[]})
@@ -1990,7 +2097,7 @@ def exportar_cronograma(pid):
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     db = SessionLocal()
     try:
-        p = db.query(Projeto).get(pid)
+        p = db.query(Projeto).filter(Projeto.id == pid).first()
         if not p: return jsonify({"error":"Não encontrado"}), 404
         wb = openpyxl.Workbook()
         ws = wb.active
@@ -2036,7 +2143,7 @@ def salvar_editor(pid):
     """Salva em lote todas as tarefas do editor inline."""
     db = SessionLocal()
     try:
-        p = db.query(Projeto).get(pid)
+        p = db.query(Projeto).filter(Projeto.id == pid).first()
         if not p:
             return jsonify({"error": "Projeto não encontrado"}), 404
         dados = request.get_json(force=True) or {}
@@ -2047,7 +2154,7 @@ def salvar_editor(pid):
         for i, td in enumerate(tarefas_data):
             preds = td.get("predecessoras") or []
             if isinstance(preds, str):
-                preds = [x.strip() for x in _re2.split(r'[,;]', preds) if x.strip()]
+                preds = [x.strip() for x in _re.split(r'[,;]', preds) if x.strip()]
             dur = td.get("duracao")
             try: dur = int(dur) if dur else None
             except: dur = None
@@ -2101,7 +2208,7 @@ def importar_xml(pid):
     import xml.etree.ElementTree as _ET
     db = SessionLocal()
     try:
-        p = db.query(Projeto).get(pid)
+        p = db.query(Projeto).filter(Projeto.id == pid).first()
         if not p:
             return jsonify({"error": "Projeto não encontrado"}), 404
         if "file" not in request.files:
@@ -2133,7 +2240,7 @@ def importar_xml(pid):
         def _dur_days(s):
             """Converte duração ISO 8601 do MS Project (PT8H0M0S) em dias úteis (8h/dia)."""
             if not s: return None
-            m = _re2.match(r'P(?:(\d+)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+)M)?(?:[\d.]+S)?)?', s)
+            m = _re.match(r'P(?:(\d+)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+)M)?(?:[\d.]+S)?)?', s)
             if m:
                 days = float(m.group(1) or 0)
                 hours = float(m.group(2) or 0)
@@ -2282,7 +2389,7 @@ def criar_equipamento():
 def atualizar_equipamento(eid):
     db = SessionLocal()
     try:
-        e = db.query(Equipamento).get(eid)
+        e = db.query(Equipamento).filter(Equipamento.id == eid).first()
         if not e: return jsonify({"error":"Não encontrado"}), 404
         d = request.get_json(force=True) or {}
         if "nome" in d: e.nome = str(d["nome"]).strip()
@@ -2299,7 +2406,7 @@ def atualizar_equipamento(eid):
 def deletar_equipamento(eid):
     db = SessionLocal()
     try:
-        e = db.query(Equipamento).get(eid)
+        e = db.query(Equipamento).filter(Equipamento.id == eid).first()
         if not e: return jsonify({"error":"Não encontrado"}), 404
         db.delete(e); db.commit()
         return jsonify({"success": True})
@@ -2339,7 +2446,7 @@ def criar_veiculo():
 def atualizar_veiculo(vid):
     db = SessionLocal()
     try:
-        v = db.query(Veiculo).get(vid)
+        v = db.query(Veiculo).filter(Veiculo.id == vid).first()
         if not v: return jsonify({"error":"Não encontrado"}), 404
         d = request.get_json(force=True) or {}
         if "placa" in d: v.placa = str(d["placa"]).strip().upper()
@@ -2356,7 +2463,7 @@ def atualizar_veiculo(vid):
 def deletar_veiculo(vid):
     db = SessionLocal()
     try:
-        v = db.query(Veiculo).get(vid)
+        v = db.query(Veiculo).filter(Veiculo.id == vid).first()
         if not v: return jsonify({"error":"Não encontrado"}), 404
         db.delete(v); db.commit()
         return jsonify({"success": True})
@@ -2403,7 +2510,7 @@ def criar_terceiro():
 def atualizar_terceiro(tid):
     db = SessionLocal()
     try:
-        t = db.query(HistoricoTerceiro).get(tid)
+        t = db.query(HistoricoTerceiro).filter(HistoricoTerceiro.id == tid).first()
         if not t: return jsonify({"error":"Não encontrado"}), 404
         d = request.get_json(force=True) or {}
         if "nome" in d: t.nome = _normalizar_nome(d["nome"])
@@ -2421,10 +2528,110 @@ def atualizar_terceiro(tid):
 def deletar_terceiro(tid):
     db = SessionLocal()
     try:
-        t = db.query(HistoricoTerceiro).get(tid)
+        t = db.query(HistoricoTerceiro).filter(HistoricoTerceiro.id == tid).first()
         if not t: return jsonify({"error":"Não encontrado"}), 404
         db.delete(t); db.commit()
         return jsonify({"success": True})
+    finally:
+        db.close()
+
+
+# ─────────────────────────────────────────────
+# PTe OBRA (Planejamento de Obras > Histórico PTe)
+# ─────────────────────────────────────────────
+
+@api.route("/pte-obra/registros", methods=["GET"])
+def pte_obra_listar():
+    """Lista todos os registros PTe Obra."""
+    db = SessionLocal()
+    try:
+        regs = db.query(PteObraRegistro).order_by(PteObraRegistro.criado_em.desc()).all()
+        return jsonify({"registros": [r.to_dict() for r in regs]})
+    finally:
+        db.close()
+
+
+@api.route("/pte-obra/registros/<int:rid>", methods=["PATCH"])
+def pte_obra_editar(rid):
+    """Edita hora_inicio e/ou hora_fim de um registro PTe Obra."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Dados inválidos"}), 400
+    db = SessionLocal()
+    try:
+        reg = db.query(PteObraRegistro).filter(PteObraRegistro.id == rid).first()
+        if not reg:
+            return jsonify({"error": "Não encontrado"}), 404
+        if "hora_inicio" in data:
+            reg.hora_inicio = data["hora_inicio"]
+        if "hora_fim" in data:
+            reg.hora_fim = data["hora_fim"]
+        db.commit()
+        return jsonify({"success": True, "registro": reg.to_dict()})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+@api.route("/pte-obra/registros/<int:rid>/detalhes", methods=["GET"])
+def pte_obra_detalhes(rid):
+    """Retorna colaboradores e PDFs vinculados ao registro PTe Obra."""
+    db = SessionLocal()
+    try:
+        reg = db.query(PteObraRegistro).filter(PteObraRegistro.id == rid).first()
+        if not reg:
+            return jsonify({"error": "Não encontrado"}), 404
+
+        colaboradores = []
+        pdfs = []
+
+        if reg.processamento_id:
+            proc = db.query(ProcessamentoRDO).filter(ProcessamentoRDO.id == reg.processamento_id).first()
+            if proc:
+                # PDFs armazenados
+                try:
+                    pdfs = json.loads(proc.pdfs_json or '[]')
+                except Exception:
+                    pdfs = []
+                # Colaboradores do resultado_json { "data|ini|fim": [{nome,cpf,...}] }
+                try:
+                    resultado = json.loads(proc.resultado_json or '{}')
+                    seen = set()
+                    for colabs in resultado.values():
+                        for c in colabs:
+                            key = c.get('nome', '') + c.get('cpf', '')
+                            if key not in seen:
+                                seen.add(key)
+                                colaboradores.append(c)
+                    colaboradores.sort(key=lambda x: x.get('nome', ''))
+                except Exception:
+                    pass
+
+        return jsonify({
+            "colaboradores": colaboradores,
+            "pdfs": pdfs,
+            "processamento_id": reg.processamento_id,
+        })
+    finally:
+        db.close()
+
+
+@api.route("/pte-obra/registros/<int:rid>", methods=["DELETE"])
+def pte_obra_deletar(rid):
+    """Remove um registro PTe Obra."""
+    db = SessionLocal()
+    try:
+        reg = db.query(PteObraRegistro).filter(PteObraRegistro.id == rid).first()
+        if not reg:
+            return jsonify({"error": "Não encontrado"}), 404
+        db.delete(reg)
+        db.commit()
+        return jsonify({"success": True})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
     finally:
         db.close()
 

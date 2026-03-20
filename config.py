@@ -19,7 +19,15 @@ PDFS_DIR.mkdir(exist_ok=True)
 SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 # Configurações do Flask
-SECRET_KEY = os.environ.get("SECRET_KEY", "rdo-promax-v2-secret-key-2026")
+_default_secret = "rdo-promax-v2-secret-key-2026"
+SECRET_KEY = os.environ.get("SECRET_KEY", _default_secret)
+if SECRET_KEY == _default_secret:
+    import warnings
+    warnings.warn(
+        "[SIPE] SECRET_KEY não configurada via variável de ambiente. "
+        "Defina SECRET_KEY=<valor-seguro> no ambiente para produção.",
+        stacklevel=2,
+    )
 DEBUG = os.environ.get("DEBUG", "True").lower() == "true"
 
 # Configurações de Fuzzy Matching

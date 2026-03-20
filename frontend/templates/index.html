@@ -65,10 +65,6 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2z"/></svg>
             Relatório Diário de Obra
           </div>
-        </div>
-
-        <div class="nav-section">
-          <div class="nav-section-label">Módulo Recursos Humanos</div>
           <div class="nav-item" data-page="rdo" onclick="navigateTo('rdo')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
             Leitura PTe Cesla
@@ -582,7 +578,7 @@
           <div style="display:flex; gap:2px; border-bottom:3px solid var(--border-subtle); margin-bottom:20px;" id="planSecoes">
             <button class="plan-secao active" data-secao="dashboard-op" onclick="plan.secao('dashboard-op')">📊 Dashboard Operacional</button>
             <button class="plan-secao" data-secao="cronograma" onclick="plan.secao('cronograma')">📅 Cronograma de Obra</button>
-            <button class="plan-secao" data-secao="capital" onclick="plan.secao('capital')">👤 Gestão de Capital Humano</button>
+            <button class="plan-secao" data-secao="capital" onclick="plan.secao('capital')">👤 Gestão de Recursos</button>
             <button class="plan-secao" data-secao="historico-pte" onclick="plan.secao('historico-pte')">📜 Histórico PTe</button>
           </div>
 
@@ -645,12 +641,33 @@
                 Apagar Projeto
               </button>
               <button class="btn btn-secondary btn-sm" onclick="plan.relatorio()" id="btnRelatorio" disabled>📋 Relatório</button>
+              <button class="btn btn-ghost btn-sm" onclick="plan.calculadoraHoras()" title="Calculadora de Horas">⏱️ Horas</button>
               <div style="margin-left:auto; display:flex; gap:6px; flex-wrap:wrap;" id="planFiltros">
                 <button class="btn btn-ghost btn-sm plan-filtro active" data-f="tudo" onclick="plan.filtrar('tudo')">Tudo</button>
-                <button class="btn btn-ghost btn-sm plan-filtro" data-f="s-1" onclick="plan.filtrar('s-1')">S-1</button>
+                <button class="btn btn-ghost btn-sm plan-filtro" data-f="sm1" onclick="plan.filtrar('sm1')">S-1</button>
                 <button class="btn btn-ghost btn-sm plan-filtro" data-f="s0"  onclick="plan.filtrar('s0')">S+0</button>
                 <button class="btn btn-ghost btn-sm plan-filtro" data-f="s1"  onclick="plan.filtrar('s1')">S+1</button>
                 <button class="btn btn-ghost btn-sm plan-filtro" data-f="s2"  onclick="plan.filtrar('s2')">S+2</button>
+              </div>
+            </div>
+
+            <!-- KPIs do projeto selecionado -->
+            <div id="planKpis" style="display:none; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
+              <div class="card" style="padding:12px 20px; flex:1; min-width:120px; text-align:center;">
+                <div style="font-size:22px; font-weight:700; color:var(--primary-600);" id="planTotalTarefas">—</div>
+                <div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Atividades</div>
+              </div>
+              <div class="card" style="padding:12px 20px; flex:1; min-width:120px; text-align:center;">
+                <div style="font-size:22px; font-weight:700; color:var(--success-600);" id="planConcluidas">—</div>
+                <div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Concluídas</div>
+              </div>
+              <div class="card" style="padding:12px 20px; flex:1; min-width:120px; text-align:center;">
+                <div style="font-size:22px; font-weight:700; color:var(--warning-600);" id="planEmAndamento">—</div>
+                <div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Em Andamento</div>
+              </div>
+              <div class="card" style="padding:12px 20px; flex:1; min-width:120px; text-align:center;">
+                <div style="font-size:22px; font-weight:700; color:var(--primary-500);" id="planAvanco">—</div>
+                <div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Avanço Geral</div>
               </div>
             </div>
 
@@ -680,10 +697,22 @@
 
             <!-- TAB: CURVA S -->
             <div id="planTabCurvas" style="display:none;">
+              <div class="card" style="margin-bottom:16px;">
+                <div class="card-header">
+                  <div><div class="card-title">📈 Curva de Avanço Físico (Curva S)</div><div class="card-subtitle">% Acumulado Previsto vs. Real</div></div>
+                  <div style="display:flex; gap:4px; margin-left:auto;">
+                    <button class="btn btn-ghost btn-sm curvaS-tipo-btn active" data-tipo="line" onclick="plan.setCurvaSType('line')" style="font-size:11px;">📈 Linha</button>
+                    <button class="btn btn-ghost btn-sm curvaS-tipo-btn" data-tipo="bar" onclick="plan.setCurvaSType('bar')" style="font-size:11px;">📊 Barras</button>
+                  </div>
+                </div>
+                <div style="position:relative; height:320px;"><canvas id="curvaSChart"></canvas></div>
+                <div id="curvaSDesvio" style="margin-top:12px; display:none;"></div>
+              </div>
+              <!-- Linha de Base — Tabela Semanal Transposta -->
               <div class="card">
-                <div class="card-header"><div><div class="card-title">📈 Curva de Avanço Físico (Curva S)</div><div class="card-subtitle">% Acumulado Previsto vs. Real</div></div></div>
-                <div style="position:relative; height:360px;"><canvas id="curvaSChart"></canvas></div>
-                <div id="curvaSDesvio" style="margin-top:16px; display:none;"></div>
+                <div id="curvaSLineBase">
+                  <div class="empty-state" style="padding:30px;"><div class="empty-state-title">Selecione um projeto</div></div>
+                </div>
               </div>
             </div>
 
@@ -828,20 +857,16 @@
             <div class="card">
               <div class="card-header">
                 <div>
-                  <div class="card-title">📜 Histórico de Processamentos PTe</div>
-                  <div class="card-subtitle">Todos os RDOs processados pelo sistema</div>
+                  <div class="card-title">Histórico PTe — Planejamento de Obras</div>
+                  <div class="card-subtitle">Registros salvos automaticamente ao confirmar leitura de PTe</div>
                 </div>
-                <div class="search-wrapper" style="margin-left:auto;">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                  <input class="input" type="text" id="searchHistorico" placeholder="Pesquisar por nome ou matrícula..." onkeydown="if(event.key==='Enter') loadHistorico()" oninput="onHistoricoSearch()" style="width: 280px;">
-                  <button class="btn btn-secondary btn-sm" onclick="loadHistorico()">Buscar</button>
-                </div>
+                <button class="btn btn-secondary btn-sm" style="margin-left:auto;" onclick="plan.pteObraCarregarRegistros()">Atualizar</button>
               </div>
-              <div id="historicoContent">
-                <div class="empty-state">
-                  <div class="empty-state-icon">📜</div>
-                  <div class="empty-state-title">Nenhum processamento registrado</div>
-                  <div class="empty-state-desc">Processe um RDO para ver o histórico aqui.</div>
+              <div id="pteObraTabela" style="overflow-x:auto;padding:0 4px 12px;">
+                <div class="empty-state" style="padding:40px;">
+                  <div class="empty-state-icon">📋</div>
+                  <div class="empty-state-title">Nenhum registro ainda</div>
+                  <div class="empty-state-desc">Confirme uma leitura de PTe na tela de Efetivo para gerar registros aqui.</div>
                 </div>
               </div>
             </div>
@@ -1048,6 +1073,6 @@
     <div id="relExecContent"></div>
   </div>
 
-  <script src="/static/js/app.js?v=16.0"></script>
+  <script src="/static/js/app.js?v=17.0"></script>
 </body>
 </html>
